@@ -1,0 +1,281 @@
+diff -ruN '--exclude=__pycache__' "D:\\strata\\backups\\2026-10-27-pre-ds4vision\\serve/ds4vision.py" serve/ds4vision.py
+--- "D:\\strata\\backups\\2026-10-27-pre-ds4vision\\serve/ds4vision.py"	1970-01-01 01:00:00.000000000 +0100
++++ serve/ds4vision.py	2026-10-27 15:40:49.724170400 +0100
+@@ -0,0 +1,245 @@
++"""DeepSeek-V4.1 (dsv41) native image input - LOCAL PATCH (2026-10-27), not upstream Strata.
++Draft implementation of Strata feature request #3937 ("Opt-in API image input for DeepSeek-V4.1-Flash-1017
++using the native vision engine").
++
++The dsv41 engine (ported from Project Maya's maya-ds4, MIT - the image wire format, the span geometry and the
++resize-to-multiples-of-patch approach here follow that engine's own design and comments, see src/dsv41 in the
++Strata source tree) reads pictures itself: a GENI line names a DSI1 file (magic "DSI1", int32 count, then per
++picture int64 span start, int32 width, int32 height, raw RGB bytes) and every position of a picture's span in
++the prompt carries the image token 129264 (<|deepseek_image|>, full-width bars).  The engine's own vision tower
++(first GPU, before the layer split) turns the pixels into the span's rows: image_start, n_h rows of
++(n_w aligner rows, image_newline), image_end - n_h * (n_w + 1) + 2 positions, n_h = ceil(h/14/3), n_w = ceil(w/14/3).
++
++So this server needs no external mmproj encoder for this family: size the picture the way the tower wants
++(sides multiples of 14, span <= the pack's vision.max_image_tokens), write the DSI1 file and expand each
++placeholder the chat template already writes to its span.
++
++Picture ORDER is the one subtlety: the fixture chat template (serve/fixtures/deepseek41) merges tool results
++into the preceding user message and reorders a user message's tool_result blocks to the order of the assistant
++turn's tool_calls (its sections 1 and 2).  The DSI1 payload must name the pictures in the template's emission
++order, so template_image_order() below walks the messages exactly the way the template does.  A picture the
++template drops (a message cut by thinking-mode drop_thinking, a part type it does not render) makes the counts
++disagree and the request fails loudly ("the prompt and its images do not match"), never silently mismatched.
++
++Revert by restoring serve/ from the 2026-10-27 backup (this file plus two small edits in server.py, marked
++"ds4vision").
++"""
++import hashlib
++import os
++import struct
++import tempfile
++import time
++from base64 import b64decode
++from io import BytesIO
++from pathlib import Path
++
++PATCH = 14                 # vision.patch_size (the pack's ds4.txt)
++MERGE = 3                  # vision.downsample_ratio
++MAX_IMAGE_TOKENS = 1024    # vision.max_image_tokens
++IMAGE_TOKEN_ID = 129264
++TEMPLATE_IMAGE_TYPES = ("image", "image_url")    # the part types the fixture template turns into placeholders
++
++
++def _cdiv(a: int, b: int) -> int:
++    return -(-a // b)
++
++
++def span_of(w: int, h: int) -> int:
++    """A picture's span in prompt tokens (the engine's n_h * (n_w + 1) + 2)."""
++    nh, nw = _cdiv(h // PATCH, MERGE), _cdiv(w // PATCH, MERGE)
++    return nh * (nw + 1) + 2
++
++
++def _fit(w: int, h: int) -> tuple[int, int]:
++    """Sides down to multiples of 14, shrinking (about 0.9x a round) until the span fits max_image_tokens."""
++    w, h = max(PATCH, w - w % PATCH), max(PATCH, h - h % PATCH)
++    while span_of(w, h) > MAX_IMAGE_TOKENS:
++        w, h = max(PATCH, int(w * 0.9) - int(w * 0.9) % PATCH), max(PATCH, int(h * 0.9) - int(h * 0.9) % PATCH)
++    return w, h
++
++
++def _src_of(part: dict) -> str:
++    """An image part's source as one string, in every shape that reaches prepare(): serve's normalized form
++    {"type": "image", "source": "<the string>"} (frontend._parts_of), the Anthropic source dict, and the raw
++    OpenAI {"type": "image_url", "image_url": {"url": ...} or "..."} form."""
++    if part.get("type") == "image":
++        src = part.get("source")
++        if isinstance(src, str):
++            return src                                  # _parts_of's normalized shape
++        src = src or {}
++        if src.get("type") == "base64":
++            return f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
++        return src.get("url") or src.get("path") or ""
++    url = part.get("image_url")
++    if isinstance(url, dict):
++        url = url.get("url")
++    return url or ""
++
++
++def _block_images(blocks, out):
++    for b in blocks:
++        if not isinstance(b, dict):
++            continue
++        if b.get("type") in TEMPLATE_IMAGE_TYPES:
++            out.append(b)
++        elif b.get("type") == "tool_result":
++            tc = b.get("content", "")
++            if isinstance(tc, list):
++                for s in tc:
++                    if isinstance(s, dict) and s.get("type") in TEMPLATE_IMAGE_TYPES:
++                        out.append(s)
++
++
++def template_image_order(messages) -> list:
++    """The image parts in the order the fixture chat template emits their placeholders: message order, with
++    tool messages merged into the preceding user message and each user message's tool_result blocks sorted to
++    the preceding assistant turn's tool_calls order (stable; a block whose id matches none keeps slot 0)."""
++    # the template's section 1: tool results become tool_result blocks of a user message; consecutive user
++    # messages merge (arrival order kept either way)
++    merged = []
++    for msg in messages:
++        role = msg.get("role")
++        content = msg.get("content")
++        if role == "tool":
++            tblock = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id", "") or "",
++                      "content": content if content is not None else ""}
++            prev = merged[-1] if merged else None
++            if prev is not None and prev.get("role") == "user" and "content_blocks" in prev:
++                prev["content_blocks"].append(tblock)
++            else:
++                merged.append({"role": "user", "content_blocks": [tblock]})
++        elif role == "user":
++            if msg.get("content_blocks") is not None:
++                blocks = list(msg["content_blocks"])
++            elif isinstance(content, list):
++                blocks = list(content)
++            else:
++                blocks = [{"type": "text", "text": content or ""}]
++            prev = merged[-1] if merged else None
++            if prev is not None and prev.get("role") == "user" and "content_blocks" in prev \
++                    and prev.get("task") is None:
++                prev["content_blocks"] += blocks
++            else:
++                m = dict(msg)
++                m["content_blocks"] = blocks
++                merged.append(m)
++        else:
++            merged.append(msg)
++    # the template's section 2: a user message's tool_result blocks take the order of the preceding assistant
++    # turn's tool_calls (only when more than one and the turn named ids; the other blocks keep their places)
++    parts, tc_ids = [], []
++    for m in merged:
++        if m.get("role") == "assistant" and m.get("tool_calls"):
++            tc_ids = []
++            for tc in m["tool_calls"]:
++                fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
++                tc_ids.append(tc.get("id") or fn.get("id", ""))
++            continue
++        if m.get("role") == "user" and m.get("content_blocks"):
++            blocks = m["content_blocks"]
++            trs = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
++            if len(trs) > 1 and tc_ids:
++                def order_idx(b, _ids=tc_ids):
++                    idx = 0
++                    for i, tid in enumerate(_ids):
++                        if tid and tid == b.get("tool_use_id", ""):
++                            idx = i                     # the last match's place, as in the template
++                    return idx
++                sorted_trs = sorted(trs, key=order_idx)  # stable, like the template's sort
++                it = iter(sorted_trs)
++                blocks = [next(it) if isinstance(b, dict) and b.get("type") == "tool_result" else b
++                          for b in blocks]
++            _block_images(blocks, parts)
++            continue
++        content = m.get("content")
++        if isinstance(content, list):
++            _block_images([b for b in content if not (isinstance(b, dict) and b.get("type") == "tool_result")],
++                          parts)
++    return parts
++
++
++class Ds4Vision:
++    """Service.vision for arch deepseek41: no reader process, no embeddings - the engine encodes.  The
++    attributes the generic code touches: elastic (no _vision_up work), dir (where the DSI1 files go)."""
++    ds4_native = True
++    elastic = False
++
++    def __init__(self) -> None:
++        self.dir = Path(tempfile.gettempdir()) / f"strata-ds4vision-{os.getpid()}"
++
++    @staticmethod
++    def _pixels(src: str):
++        """(w, h, rgb bytes) of an image source: a local path, a data: URL or an already-downloaded file."""
++        from PIL import Image
++        if src.startswith("data:"):
++            head, _, data = src.partition(",")
++            if ";base64" in head:
++                img = Image.open(BytesIO(b64decode(data)))
++            else:
++                from urllib.parse import unquote_to_bytes
++                img = Image.open(BytesIO(unquote_to_bytes(data)))
++        else:
++            img = Image.open(src)
++        img = img.convert("RGB")
++        w, h = _fit(*img.size)
++        if (w, h) != img.size:
++            img = img.resize((w, h), Image.Resampling.LANCZOS)
++        return w, h, img.tobytes()
++
++    def encode(self, src: str) -> int:
++        """Readability probe for the tool-images path (its return is unused there): the picture's span."""
++        w, h, _ = self._pixels(src)
++        return span_of(w, h)
++
++    def splice(self, svc, messages, tools, kwargs, images, fetched, cancel):
++        """The request's pictures into the prompt and the DSI1 file for GENI.
++
++        -> (expanded ids, the unexpanded ids for the kept-prompt cache).  `images` (images_of's collection) is
++        only a cross-check: the payload's order is template_image_order's, the order the placeholders actually
++        appear in the rendered prompt.  Sets svc.embeddings.path / .keys for the existing GENI plumbing (run()
++        deletes the file, drop_embeddings() when no run starts)."""
++        from serve.server import ClientGone, Vision
++
++        ordered = [_src_of(p) for p in template_image_order(messages)]
++        if len(ordered) != len(images):
++            raise ValueError("the prompt and its images do not match")
++
++        pics = []
++        for src in ordered:
++            if cancel is not None and cancel.is_set():
++                raise ClientGone()
++            if svc.offline and src.startswith(("http://", "https://")):
++                raise ValueError("offline mode cannot download an image URL; send a data: image instead")
++            if src in fetched:
++                src = fetched[src]
++            elif src.startswith(("http://", "https://")):
++                src = Vision.download(src)
++            pics.append(self._pixels(src))
++
++        # the fixture template writes one <｜deepseek_image｜> a picture, in place, in the order above
++        ids = svc.encode_prompt(messages, tools, kwargs)
++
++        out, starts, k = [], [], 0
++        for t in ids:
++            if t == IMAGE_TOKEN_ID:
++                if k >= len(pics):
++                    raise ValueError("the prompt and its images do not match")
++                starts.append(len(out))
++                out += [IMAGE_TOKEN_ID] * span_of(pics[k][0], pics[k][1])
++                k += 1
++            else:
++                out.append(t)
++        if k != len(pics):
++            raise ValueError("the prompt and its images do not match")
++
++        self.dir.mkdir(parents=True, exist_ok=True)
++        path = self.dir / f"{time.monotonic_ns()}.dsi1"
++        with open(path, "wb") as f:                    # the engine's read_pics(): magic, count, (start, w, h, rgb)+
++            f.write(b"DSI1")
++            f.write(struct.pack("<i", len(pics)))
++            for (w, h, rgb), start in zip(pics, starts):
++                f.write(struct.pack("<qii", start, w, h))
++                f.write(rgb)
++        svc.embeddings.path = str(path)
++        svc.embeddings.keys = [hashlib.md5(rgb).hexdigest()[:16] for _, _, rgb in pics]
++        return out, ids
+diff -ruN '--exclude=__pycache__' "D:\\strata\\backups\\2026-10-27-pre-ds4vision\\serve/server.py" serve/server.py
+--- "D:\\strata\\backups\\2026-10-27-pre-ds4vision\\serve/server.py"	2026-10-27 13:41:19.294912300 +0100
++++ serve/server.py	2026-10-27 14:01:48.982206100 +0100
+@@ -4831,6 +4831,15 @@
+         self.embeddings.path = None
+         self.embeddings.keys = None
+         images = images_of(messages)
++        if images and self.family == "deepseek41" and getattr(self.vision, "ds4_native", False):
++            # ds4vision local patch: the dsv41 engine reads pictures itself (a DSI1 file of raw RGB named in
++            # the GENI line): the prompt gets one image token a picture, expanded to its span, and no
++            # external encoder runs.  images -> [] so the mmproj flow below is skipped.
++            ids, encoded_ids = self.vision.splice(self, messages, tools, kwargs, images, fetched, cancel)
++            if force and kwargs.get("enable_thinking", True) is False:
++                ids = ids + self.tok.encode(force, parse_special=True)
++            self.last_image_at = time.time()
++            images = []
+         if images:
+             if self.offline and any(src.startswith(("http://", "https://")) for src in images):
+                 raise ValueError("offline mode cannot download an image URL; send a data: image instead")
+@@ -8374,6 +8383,12 @@
+                 vcfg["elastic"] = False
+             vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None,
+                             env=vision_env(cfg, env), lazy=lazy)
++        if vision is None and (cfg.get("arch") or "") == "deepseek41":
++            # ds4vision local patch: the dsv41 engine reads pictures itself (GENI names a DSI1 file of raw
++            # RGB; its own tower encodes on the first GPU) - no mmproj reader exists for this family.
++            from serve.ds4vision import Ds4Vision
++            vision = Ds4Vision()
++            print("DeepSeek's own vision tower reads the pictures (no external encoder) ...", flush=True)
+         print("model unloaded; the first request loads it ..." if lazy else
+               "loading the model (the first start takes a minute or two) ...", flush=True)
+         warn_budget_over_ram(engine_args(cfg) if "args" in cfg else [])      # #1080
