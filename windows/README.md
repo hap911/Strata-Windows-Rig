@@ -19,22 +19,12 @@ NVMe. It will run on less (single GPU, 128 GB RAM) at lower speed; the `--ssd-ca
 now has CUDA-graph decode (~38 tok/s on the reference rig, up to 42.4 on warmed-up turns; up from ~26–30). What changed:
 [root README notes](../README.md#notes--2026-10-30-upstream-028--engine-0154-cuda-graphs).
 
-## Legacy quick path (engine 0.1.51 only)
+## Quick path: the StrataRig release (no compiler)
 
-The [guided Windows release](https://github.com/hap911/Strata/releases/tag/windows-rig-0.1.51.3)
-targets the older engine 0.1.51 and does not include the CUDA graphs. Use the manual build below for
-engine 0.1.54. On engine 0.1.51 it supports the official IST-DAS 1.75, 2.00 and 2.25 bpw presets.
-Stop Strata, extract the release, and run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Setup-StrataDeepSeek.ps1
-strata launch --preset "DeepSeek Vision Abliterated" --yes
-powershell -ExecutionPolicy Bypass -File .\Test-StrataDeepSeek.ps1
-```
-
-The first command installs the patched engine and server, prepares the pinned adapter and official
-vision tower, and creates the preset while preserving your existing launch choices. The last command
-checks native vision and the running engine's adapter. Your stock preset is not changed.
+Download [StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1),
+extract it and run `Setup.bat`. It installs official Strata if missing, lets Strata set up DeepSeek once, checks the
+engine version (0.1.54) and installs the patched engine and adapter. Details:
+[release/README.md](release/README.md).
 
 The rest of this page is the manual build and tuning walkthrough.
 

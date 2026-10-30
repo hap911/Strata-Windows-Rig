@@ -222,38 +222,6 @@ The launchers find Strata's current engine folder themselves, so an engine updat
 them — but the update replaces the engine, so run `build-strata-engine.bat install` again (after a
 rebuild if the engine version changed). `windows\restore-official-engine.bat` puts the official exe back.
 
-### Legacy: guided setup for engine 0.1.51
-
-The guided release below targets the older engine 0.1.51 and does not include the CUDA-graph speed-up.
-It supports the official IST-DAS 1.75, 2.00 and 2.25 bpw presets on engine 0.1.51. Stop Strata,
-download and extract the
-[guided Windows release](https://github.com/hap911/Strata/releases/tag/windows-rig-0.1.51.3), then run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Setup-StrataDeepSeek.ps1
-```
-
-The setup installs the patched engine and vision server with backups, downloads and verifies the pinned
-adapter and official vision tower, adds the tower to the model pack, and creates a new preset. It keeps
-your GPU, context, port, API key and tuning choices. The stock preset stays unchanged. No compiler or
-JSON editing is needed.
-
-Start the new preset with the normal Strata command:
-
-```bat
-strata launch --preset "DeepSeek Vision Abliterated" --yes
-```
-
-Then check the running setup from the extracted release folder:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Test-StrataDeepSeek.ps1
-```
-
-The read-only check requires `/health` to report `images=true`, checks the engine's `--ablate` argument,
-and verifies the adapter's size and SHA-256. Point anything OpenAI-compatible at
-`http://127.0.0.1:8080/v1` (or the port preserved from your stock preset).
-
 ## Notes — 2026-10-30: upstream 0.2.8 / engine 0.1.54, CUDA graphs
 
 - **Upgraded to upstream Strata 0.2.8 (DeepSeek engine 0.1.54).** Strata auto-updated the engine and
