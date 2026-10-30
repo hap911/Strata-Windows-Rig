@@ -44,7 +44,7 @@ abliteration, no speed-ups) and tells you so. Install the matching StrataRig rel
 |---|---|---|
 | `ssd_cache_gb` | RAM − 56 GB, max 135 | RAM cache for experts that fit in no GPU — the biggest speed lever |
 | `cpu_threads` | logical CPUs | CPU expert lane threads |
-| `context` | `256k` | context length |
+| `context` | `256k` | context window; Strata's `256k` = 262,144 tokens, the model's full window |
 | `reserve_mib` | (Strata default) | VRAM to leave free, per GPU: `"900,100"` keeps 900 MiB on a desktop GPU |
 | `ds4_split` | (engine's own) | layers per GPU, e.g. `"14,26"` for a 12 GB + 32 GB pair |
 | `cuda_graphs` | `true` | CUDA-graph decode, the main speed-up (byte-identical output) |

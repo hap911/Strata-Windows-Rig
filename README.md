@@ -84,9 +84,9 @@ the 6-turn test a realistic multi-turn coding session with a warming expert cach
 
 ### Live, from the Strata monitor
 
-![Strata monitor during a coding session: 36.5 tok/s now, recent requests at 38.0-42.6 tok/s with 184K of 256K context filled](windows/docs/live-monitor-2026-10-30.png)
+![Strata monitor during a coding session: 36.5 tok/s now, recent requests at 38.0-42.6 tok/s with 184K tokens of the 262K context window in use](windows/docs/live-monitor-2026-10-30.png)
 
-Real work, not a benchmark: a long coding session with the context at **184K of 256K tokens**, the last
+Real work, not a benchmark: a long coding session with **184K tokens** of the 262K-token context window in use (the monitor shows the window as "256K": 262,144 tokens), the last
 four answers at **38.0 / 39.3 / 42.4 / 42.6 tok/s** (prompts of ~187K tokens, almost all reused from the
 conversation cache). Both GPUs nearly full (42.9 / 44 GB), the 5090 on a **PCIe Gen4 x16** link,
 162 GB of the 192 GB RAM in use, ~3,500 experts in VRAM. 2026-10-30, the graphs launcher on engine 0.1.54.
