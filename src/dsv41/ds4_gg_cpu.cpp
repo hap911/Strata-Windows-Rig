@@ -95,7 +95,11 @@ void gg_cpu_set_iq256(int mode) { g_iq256 = mode; }
 // IQ1_M from one token too: ggml's own IQ1_M dot (and IQ1_S's) uses _pdep_u64 where the build has BMI2, which AMD Zen 1/2 run in
 // microcode - 1.8 GB/s against these rows' 33 GB/s on an EPYC 7452 (a 2.00 set decodes 3x slower on one card), 19-31 GB/s on Intel.
 // The rows are bit-identical, so taking them at every token count only changes the speed.
-static int min_tokens(int type) { return type == 21 ? 1 : type == 29 ? 1 : 2; }
+// (whole-expert investigation: that holds where ggml-cpu was built with BMI2.  Without it - this repo's portable build,
+//  GGML_BMI2=OFF - ggml's IQ1_M dot takes its table path, which beats these rows at one token: ds4_gg_bench --expert on a
+//  Threadripper 3960X, 24 threads, IQ1_M experts 38 (ggml) / 47.5 (ggml with SIMD delta signs) against 34.4 GB/s, the
+//  engine's lane 232 / 194 against 255 us an expert.  So IQ1_M follows the 2-token rule there.)
+static int min_tokens(int type) { return type == 21 ? 1 : type == 29 ? (ggml_cpu_has_bmi2() ? 1 : 2) : 2; }
 static bool own_ok(int type, int impl) {
     static std::once_flag once[2][32];
     static bool ok[2][32];
@@ -169,7 +173,7 @@ static int amd_family() {
         if (!__get_cpuid(1, &a, &b, &c, &d)) return 0;
         const unsigned eax = a;
 #else
-        return 0;
+        const unsigned eax = 0;   // (not an x86 host: no family)
 #endif
         const unsigned base = (eax >> 8) & 0xF;
         return (int) (base == 0xF ? base + ((eax >> 20) & 0xFF) : base);

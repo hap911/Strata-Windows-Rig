@@ -18,4 +18,4 @@ if /i "%~1"=="stats" (
     "%LOCALAPPDATA%\Strata\terminal\current\python\python.exe" "D:\strata\deepseek_stats.py"
     exit /b 0
 )
-call "D:\strata\run-deepseek-abliterated.bat"
+call "%~dp0run-deepseek-abliterated-largepages-graphs.bat"

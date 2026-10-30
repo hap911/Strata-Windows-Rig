@@ -28,9 +28,13 @@ struct Options {
     std::vector<int> gpus;            // empty: every visible GPU
     int64_t reserve_mib = 600;        // VRAM left free on each GPU
     std::vector<int64_t> reserve_mib_dev;   // --reserve-mib N,M,...: per-GPU reserves, in devs order (empty: reserve_mib on all)
+    bool vram_experts_auto = true;    // (Metal: no --vram-experts given: the share the anonymous-memory cap leaves - metal_expert_cap)
     double vram_experts = 1.0;        // the share of the expert budget to use (tests: less, so the CPU lane works)
     int cpu_threads = 0;              // 0: the physical cores
     std::string profile;              // expert hit counts (read to place the hottest experts in VRAM, written back)
+    // --profile-readonly: read the profile to place the experts, never write it back.  Without this the run's routing
+    // counts go into the file, so the next run places experts differently and greedy output / KL move between runs.
+    bool profile_readonly = false;
     bool expert_cache = true;         // experts move between VRAM and the CPU lane as they are used
     // the CPU lane's experts read in place from the model's files, the page cache keeping what fits, instead of
     // copied into RAM: 1 on, 0 off, -1 (auto) where the RAM this process can get does not hold them
@@ -87,7 +91,7 @@ struct Stats {
     int64_t swaps = 0;                // experts the cache moved into VRAM
     int64_t skipped = 0;              // routed experts STRATA_DS4_DISK_SKIP_W left out (light, not in RAM)
     int64_t ram_experts = 0, ram_moves = 0;   // CPU-lane experts read from the RAM tier; experts moved into it
-    double prof_ms[6] = {};          // DS4_PROF: the GPU's time in decode by stage (between layers, attention, routing +
+    double prof_ms[16] = {};          // DS4_PROF: the GPU's time in decode by stage (between layers, attention, routing +
     int64_t prof_tokens = 0;         // shared expert, experts' gate / up, the wait for the CPU lane, down + post)
     // lookahead (decode windows of one): the picks of layers guessed a layer before (the next layer's gate on this
     // layer's FFN input), of them in the guess's top k / in all its guesses / in the guess two layers before; the picks
@@ -136,6 +140,8 @@ public:
     /// DeepSeek's reference does.  verify() keeps a draft d with probability min(1, p(d) / q(d)) over the request's
     /// chain - the speculative-sampling rule, so every token is still distributed as the model's own draw.
     int draft_block() const;
+    /// every GPU the engine uses is a gfx1200 / gfx1201 (RDNA4: R9700, RX 9000) in a HIP build, false anywhere else (decided once)
+    bool gpus_are_gfx12() const;
     bool draft(int y, std::vector<int>& drafts, std::vector<float>& conf, std::string& err, float temperature = 0.0f,
                float top_p = 1.0f, int top_k = 0, float min_p = 0.0f, uint64_t seed = 0, uint64_t counter = 0);
     bool verify(int y, const std::vector<int>& drafts, float temperature, float top_p, int top_k, float min_p,

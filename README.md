@@ -1,3 +1,5 @@
+<p align="center"><img src="windows/docs/banner.svg" alt="Strata Windows Rig: DeepSeek-V4.1-Flash 763B at ~38 tok/s on an RTX 5090 + RTX 3080 Ti with 192 GB RAM" width="100%"></p>
+
 # Strata — experimental Windows rig build
 
 **Status: experimental version.** Expect bugs, rough edges and breaking changes. This is a research
@@ -7,13 +9,14 @@ snapshot, not a stable or production-ready release. Test it in an isolated envir
 (<lvesely911@gmail.com>). Upstream Strata and third-party components remain credited to their
 respective authors; this notice does not claim authorship of their work.
 
-**A 763-billion-parameter model, uncensored, with vision, at 262K context — chatting at ~30 tokens
+**A 763-billion-parameter model, uncensored, with vision, at 262K context — chatting at ~38 tokens
 per second on a desktop PC.** No datacenter. No API bill. One RTX 5090, one RTX 3080 Ti, 192 GB of
 RAM, and a pile of patches on top of [Strata](https://github.com/Niko1221/Strata).
 
-This snapshot is the exact state my machine runs. The engine patches are included in this source
-snapshot; the Windows scripts, presets and docs live in [`windows/`](windows/). Model weights are
-**not** in this repo — links below.
+This snapshot is the exact state my machine runs: **upstream Strata 0.2.8 / DeepSeek engine 0.1.54**
+plus the patches below. The engine patches are included in this source snapshot; the Windows scripts,
+presets and docs live in [`windows/`](windows/). Model weights are **not** in this repo — links below.
+What changed in this update: [Notes — 2026-10-30](#notes--2026-10-30-upstream-028--engine-0154-cuda-graphs).
 
 > [!WARNING]
 > ## Legal disclaimer — authorized research only
@@ -46,20 +49,52 @@ snapshot; the Windows scripts, presets and docs live in [`windows/`](windows/). 
 
 ---
 
+## The rig
+
+| Part | What's in it | Role |
+|---|---|---|
+| CPU | AMD Threadripper 3960X, 24 cores / 48 threads (Zen 2) | the CPU expert lane: experts that fit in neither GPU, 48 threads |
+| RAM | 192 GB DDR4 | 135 GB expert cache (`--ssd-cache 135`), optionally on 2 MB large pages |
+| GPU 0 | NVIDIA RTX 3080 Ti, 12 GB — also drives the desktop | layers 0–13 + vision tower, ~680 experts in VRAM, 900 MiB kept free for Windows |
+| GPU 1 | NVIDIA RTX 5090, 32 GB | layers 14–39 + output head, ~2,800 experts in VRAM |
+| Storage | NVMe SSD | the 249 GB model file; experts not in RAM or VRAM are read from it |
+| OS / software | Windows 11 Pro, Strata 0.2.8 (DeepSeek engine 0.1.54) + this repo's patches, CUDA 13 | |
+
+The model: DeepSeek-V4.1-Flash-1017, 763B parameters (~16B active per token), IST-DAS IQ2_XXS 2.00 bpw.
+Roughly 30 GB of its 250 GB sit in VRAM, ~100 GB in RAM; every token routes through all three.
+
+## How fast, step by step
+
+| Setup on this rig | Decode | Method |
+|---|---|---|
+| Strata out of the box (default settings, auto layer split, engine 0.1.51) | **19.4 tok/s** | `bench_ds.py`, single 21K-token prompt |
+| Strata tuned with settings only (`--ssd-cache 120`, `--prefill-chunk 4096`, `--cpu-threads 48`) | **29.1 tok/s** | same |
+| + patched engine, `DS4_SPLIT=14,26`, large pages (previous launcher) | ~26 tok/s, 6-turn test ~119 s | 6-turn coding conversation |
+| **+ CUDA graphs, fused CPU lane, IQ1_M fix, no prompt settle (this update)** | **~38 tok/s** (up to 42.4), 6-turn test **~80 s** | same 6-turn conversation |
+
+The two methods are not comparable with each other: `bench_ds.py` measures one long fresh prompt,
+the 6-turn test a realistic multi-turn coding session with a warming expert cache (prompts of 2.7K then
+~0.2K tokens, 400 generated each turn). Compare rows only within the same method. Cold prefill on the
+21K prompt: 146.8 tok/s stock → 534.9 tok/s tuned.
+
 ## What this box does
 
 | | **DeepSeek-V4.1-Flash-1017** (the reason for this fork) |
 |---|---|
 | Size | 763B total / ~16B active MoE, 2.00 bpw (IQ2_XXS, 249 GB) |
 | Context | 262,144 tokens |
-| Decode, single stream | **~29–30 tok/s** |
-| Prefill, maximum in local serve log | **772.1 tok/s** |
+| Decode, single stream | **~38 tok/s** average over a 6-turn conversation (37.4–38.7), **up to 42.4 tok/s** on warmed-up turns; was ~26–30 before the CUDA-graph patch |
+| 6-turn coding conversation (2.7K + 5×0.2K prompt tokens, 6×400 generated) | **~80 s** total (was ~119 s with the previous launcher) |
+| Prefill, maximum in local serve log | **772.1 tok/s** (engine 0.1.51; the patches here do not change prompt speed) |
 | Refusals | abliterated at runtime (see below) |
-| Vision | **yes — native tower on the 3080 Ti** (patched in; upstream ships text-only) |
+| Vision | **yes — native tower on the 3080 Ti** (upstream ships it since 0.2.7; was patched in on 0.1.51) |
 | Multi-client | serial queue |
+| Engine base | upstream Strata 0.2.8 / DeepSeek engine 0.1.54 + the patches below |
 
 Measured on: Windows 11, Threadripper 3960X (24c/48t), 192 GB DDR4, RTX 5090 32 GB +
-RTX 3080 Ti 12 GB (drives the desktop), NVMe. The benchmark numbers are from
+RTX 3080 Ti 12 GB (drives the desktop), NVMe. The decode and 6-turn numbers are from
+[windows/docs/CUDA-GRAPHS-2026-10-30.md](windows/docs/CUDA-GRAPHS-2026-10-30.md) (interleaved A/B
+runs, fresh cache each run, the launcher's settings). The older numbers are from
 [windows/docs/TUNING-STATE.md](windows/docs/TUNING-STATE.md) — a running journal with the full
 methodology, the failures (PGO, native MSVC build, layer-split traps), and the rollback points.
 The prefill maximum is the highest of 1,778 completions in the active local serve log: 54,986 new
@@ -67,7 +102,8 @@ tokens read in 71.213 s, with another 10,767 prompt tokens reused. The highest r
 reused tokens is **741.8 tok/s** (70,962 tokens in 95.661 s).
 
 For scale: DeepSeek-V4.1-Flash is roughly twice the size of what fit in a high-end workstation a
-year ago. 20 tok/s is the floor with a completely full 250K context. It reads images, follows
+year ago. 20 tok/s was the floor with a completely full 250K context on engine 0.1.51, before the
+CUDA graphs (not re-measured yet). It reads images, follows
 multi-turn conversations across turns, and answers questions stock DeepSeek refuses.
 
 ## The uncensored part
@@ -82,35 +118,55 @@ reversible by launching without the flag.
   (included in this snapshot). `--ablate-scale` tunes the strength.
 - Adapter author's measurements on Maya: refusals 98.3% → 4.2%, HumanEval 95.1% → 95.7%
   (capability-neutral). On this rig, ablation costs **zero speed** (25.3–28.7 vs 25.7–26.1 tok/s
-  stock, same-session A/B).
+  stock, same-session A/B on engine 0.1.51; all the current benchmarks run with the adapter on).
 
 This build is meant only for authorized security research and defensive testing under the legal
 disclaimer above. You are responsible for what you generate.
 
-## The engine patches (this snapshot vs upstream 0.2.6 / engine 0.1.51)
+## The engine patches (this snapshot vs upstream 0.2.8 / engine 0.1.54)
+
+All of these are opt-in or keep upstream behaviour when unused.
 
 1. **`--ablate`** — runtime abliteration adapters (port of project-maya PR #469, MIT).
 2. **`--reserve-mib N,M,...`** — per-GPU VRAM reserves in device order, so the 3080 Ti that also
-   drives the Windows desktop keeps 1 GB free while the 5090 keeps 0.5 GB. One value behaves
-   exactly as upstream.
-3. **`DS4_STORE_LARGE=1`** — the ~120 GB expert RAM store goes on 2 MB large pages on Windows
-   (with a clean 4 KB fallback when SeLockMemoryPrivilege is missing).
-4. **Native DeepSeek vision in the API server** — `serve/ds4vision.py` + two small `server.py`
-   hunks: sizes pictures the way the tower wants, expands the chat template's `<|deepseek_image|>`
-   placeholders to full spans, and feeds the engine's GENI/DSI1 path. Upstream 0.1.51 ships the
-   dsv41 engine with the full Maya vision tower but no server route to it
-   ([issue #3937](https://github.com/Niko1221/Strata/issues/3937)); this closes that gap locally.
-   Also available as a self-contained patch: [windows/patches/ds4-native-vision-0.1.51.patch](windows/patches/ds4-native-vision-0.1.51.patch).
+   drives the Windows desktop keeps its reserve while the 5090 uses nearly all of its memory. One value
+   behaves exactly as upstream.
+3. **`DS4_STORE_LARGE=1`** — the expert RAM store on 2 MB large pages on Windows. If Windows can't
+   give one allocation that size (err 1450 on a fragmented machine), it now takes the store in 1 GB
+   large-page pieces; anything failing falls back to 4 KB pages. Measured: **no speed change** on this
+   rig (80.6/79.9 s vs 79.8/79.7 s), so it is optional.
+4. **`DS4_ATTN_GRAPH=1` — decode as CUDA graphs (the big one: ~26–27 → ~38 tok/s, 6-turn test
+   ~100 s → ~80 s).** Each decode layer
+   ran ~25 tiny dependent kernels, ~1,000 per token, each paying ~10 µs of launch and ramp-up. Each
+   layer's GPU work (attention, routing + shared expert, expert gate/up, the CPU-lane wait, down and
+   combine) is now captured once per token into CUDA graphs and launched as one unit. Verified
+   byte-identical with `DS4_ATTN_GRAPH_CHECK=1`: 98,000 graph-launched parts re-run as plain launches
+   and compared byte for byte, 0 differences.
+5. **Fused CPU expert lane** (default on, `DS4_LANE_FUSE=0` turns it off): each CPU-lane expert's
+   down projection starts as soon as its own gate/up is done, instead of waiting for all of them.
+   ~9% faster per lane call, same bits.
+6. **IQ1_M CPU kernel fix in ggml** — the sign vectors computed in SIMD instead of 8 scalar
+   branches: 1.26x on Zen 2, bit-identical. ggml is downloaded at build time, so it ships as
+   [windows/patches/ggml-iq1m-simd-signs.patch](windows/patches/ggml-iq1m-simd-signs.patch) and
+   `build-strata-engine.bat configure` drops it in.
+7. **`DS4_SETTLE_MS`** and the **whole-expert mode** (`DS4_WHOLE_EXPERT=1`) — research switches;
+   `DS4_SETTLE_MS=0` (no pause after each prompt) is worth ~9% on multi-turn work. Whole-expert mode
+   lets each GPU run the other GPU's experts; it helped before the CUDA graphs and is now ~1–2% slower,
+   so it stays off.
+
+The old native-vision server patch ([windows/patches/ds4-native-vision-0.1.51.patch](windows/patches/ds4-native-vision-0.1.51.patch))
+is no longer needed: upstream Strata ships DeepSeek vision itself since 0.2.7. It is kept for history.
 
 Plus the environment levers that don't need code: `DS4_SPLIT=14,26` layer split rebalanced toward
-the 5090 (29.9 vs 28.6 tok/s on the engine's auto split), `--ssd-cache 120` (the big one: 21 → 39+
-tok/s territory by keeping the CPU-lane experts in RAM instead of re-reading ~65 GB from SSD per
-answer), `--prefill-chunk 4096`, `--cpu-threads 48`, High performance power plan.
+the 5090 (29.9 vs 28.6 tok/s on the engine's auto split, measured on 0.1.51), `--ssd-cache 135` (keeps the CPU-lane
+experts in RAM instead of re-reading them from SSD; 120 measured the same or up to ~4% slower),
+`--prefill-chunk 4096`, `--cpu-threads 48`, High performance power plan.
 
 ## Vision that actually works
 
 The official 0.97 GB vision tower from the DeepSeek checkpoint is packed into the model pack and
-loads on the 3080 Ti before the layer split. Images come in through the normal OpenAI
+loads on the 3080 Ti before the layer split. (The test matrix below was run on 0.1.51 with the old
+server patch; upstream now has its own vision path, which the launchers use with `--vision on`.) Images come in through the normal OpenAI
 (`image_url`) and Anthropic (`image` block) APIs — URLs, data URIs, local paths, tool results.
 
 Real-checkpoint test matrix (all passing, details in the tuning journal): single image, two
@@ -130,10 +186,32 @@ Model licenses (DeepSeek etc.) apply to the weights and are between you and the 
 
 ## Run it
 
-### Easiest: prebuilt engine + guided setup
+### Build it yourself (current: engine 0.1.54)
 
-Start with the default Strata Terminal and a stock DeepSeek model you have launched once. The guided
-setup supports the official IST-DAS 1.75, 2.00 and 2.25 bpw presets on engine 0.1.51. Stop Strata,
+The full walkthrough, including the one-time large-pages privilege, is in
+**[windows/README.md](windows/README.md)**. The short version, from a clone of this repo:
+
+```bat
+rem one-time, admin: allow large pages, then sign out/in (optional - no measured speed gain)
+windows\grant-lock-pages.bat
+
+rem patched engine - once, and again after every Strata engine update
+windows\build-strata-engine.bat configure
+windows\build-strata-engine.bat build
+windows\build-strata-engine.bat install
+
+rem daily driver (CUDA graphs on)
+windows\run-deepseek-abliterated-largepages-graphs.bat
+```
+
+The launchers find Strata's current engine folder themselves, so an engine update no longer breaks
+them — but the update replaces the engine, so run `build-strata-engine.bat install` again (after a
+rebuild if the engine version changed). `windows\restore-official-engine.bat` puts the official exe back.
+
+### Legacy: guided setup for engine 0.1.51
+
+The guided release below targets the older engine 0.1.51 and does not include the CUDA-graph speed-up.
+It supports the official IST-DAS 1.75, 2.00 and 2.25 bpw presets on engine 0.1.51. Stop Strata,
 download and extract the
 [guided Windows release](https://github.com/hap911/Strata/releases/tag/windows-rig-0.1.51.3), then run:
 
@@ -162,19 +240,22 @@ The read-only check requires `/health` to report `images=true`, checks the engin
 and verifies the adapter's size and SHA-256. Point anything OpenAI-compatible at
 `http://127.0.0.1:8080/v1` (or the port preserved from your stock preset).
 
-### Build it yourself
+## Notes — 2026-10-30: upstream 0.2.8 / engine 0.1.54, CUDA graphs
 
-The full manual walkthrough, including the one-time large-pages privilege and build scripts, is in
-**[windows/README.md](windows/README.md)**. The short version:
-
-```bat
-rem one-time, admin: allow large pages, then sign out/in
-windows\grant-lock-pages.bat
-
-rem patched engine (once per Strata engine update)
-windows\build-strata-engine.bat configure
-windows\build-strata-engine.bat build
-
-rem daily driver
-windows\run-deepseek-abliterated-largepages.bat
-```
+- **Upgraded to upstream Strata 0.2.8 (DeepSeek engine 0.1.54).** Strata auto-updated the engine and
+  deleted the 0.1.51/0.1.52 folders, and the official 0.1.54 engine has no `--ablate`. All patches were
+  ported onto the 0.2.8 source: 86 of 94 hunks applied unchanged, 8 merged by hand where upstream
+  added debug hooks and Metal code around the same lines. Same speed as on the old base (80.9/81.8 s vs
+  81.6/81.8 s), graph check 98,000 parts with 0 differences.
+- **New patches:** CUDA graphs for decode (`DS4_ATTN_GRAPH=1`), fused CPU expert lane, IQ1_M ggml
+  kernel fix, large pages in 1 GB pieces.
+- **Speed on the reference rig** (6-turn coding conversation, 400 generated tokens a turn, launcher
+  settings): ~119 s with the previous launcher → **~80 s** now; decode **~26–27 → ~38 tok/s**
+  (37.4–38.7 run averages, up to 42.4 tok/s on single warmed-up turns). Prompt speed unchanged.
+- **Tried, no gain:** large pages (now working, but no measurable effect), whole-expert mode with graphs,
+  more GPU pulls of RAM experts, CPU thread count 32 vs 48, CPU job size, `ssd-cache` 120 vs 135,
+  DSpark draft tokens (crashed: its VRAM left the 3080 Ti with no experts).
+- **Launchers:** `run-deepseek-abliterated-largepages-graphs.bat` is the new daily driver; launchers
+  look up the engine folder instead of hard-coding the version; reserves are now `900,100`.
+- The full research journal (timing chain, every A/B, dead ends) is in
+  [windows/docs/CUDA-GRAPHS-2026-10-30.md](windows/docs/CUDA-GRAPHS-2026-10-30.md).

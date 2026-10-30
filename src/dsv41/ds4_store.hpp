@@ -48,7 +48,7 @@ public:
     enum Policy { kLru = 0, kLfu = 1 };
     struct Stats {
         std::atomic<int64_t> hits{0}, misses{0}, prefetched{0}, prefetch_used{0}, prefetch_wasted{0}, evictions{0}, fails{0};
-        std::atomic<int64_t> bytes_read{0}, wait_ns{0}, no_slot{0}, cancelled{0};
+        std::atomic<int64_t> bytes_read{0}, wait_ns{0}, no_slot{0}, cancelled{0}, put{0};
     };
     struct Vis {                 // a slot the GPU may read from now on (dev != 0), or no longer (dev == 0)
         int layer = 0, e = 0;
@@ -93,11 +93,41 @@ public:
             if (lp != 0) {
                 const size_t bytes = (arena_bytes_ + lp - 1) & ~(size_t) (lp - 1);
                 void* p = VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE);
+                if (p == nullptr) {
+                    // One request this size needs that many free 2 MB runs at once and fails (err 1450) on a
+                    // fragmented machine even with the RAM free.  Pieces of 1 GB laid end to end at fixed addresses
+                    // usually succeed: find a free range (reserve, release), then place each piece in it.
+                    const DWORD e1 = GetLastError();
+                    const size_t piece = std::max(lp, (size_t) 1 << 30);
+                    uint8_t* at = (uint8_t*) VirtualAlloc(nullptr, bytes + lp, MEM_RESERVE, PAGE_NOACCESS);
+                    if (at != nullptr) {
+                        VirtualFree(at, 0, MEM_RELEASE);
+                        at = (uint8_t*) (((uintptr_t) at + lp - 1) & ~(uintptr_t) (lp - 1));
+                        bool ok = true;
+                        for (size_t off = 0; ok && off < bytes; off += piece) {
+                            const size_t n = std::min(piece, bytes - off);
+                            void* q = VirtualAlloc(at + off, n, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE);
+                            if (q == at + off) large_pieces_.push_back(q);
+                            else {
+                                if (q != nullptr) VirtualFree(q, 0, MEM_RELEASE);
+                                ok = false;
+                            }
+                        }
+                        if (ok) p = at;
+                        else {
+                            std::fprintf(stderr, "ds4: RAM store: large pages in 1 GB pieces: %zu of %zu placed, then err %lu\n",
+                                         large_pieces_.size(), (bytes + piece - 1) / piece, (unsigned long) GetLastError());
+                            for (void* q : large_pieces_) VirtualFree(q, 0, MEM_RELEASE);
+                            large_pieces_.clear();
+                        }
+                    }
+                    if (p == nullptr) SetLastError(e1);
+                }
                 if (p != nullptr) {
                     arena_ = (uint8_t*) p;
                     large_ = bytes;
-                    std::fprintf(stderr, "ds4: RAM store: %.1f GB on %zu MB large pages (locked, committed up front)\n",
-                                 (double) bytes / 1e9, lp >> 20);
+                    std::fprintf(stderr, "ds4: RAM store: %.1f GB on %zu MB large pages (locked, committed up front%s)\n",
+                                 (double) bytes / 1e9, lp >> 20, large_pieces_.empty() ? "" : ", in 1 GB pieces");
                 } else {
                     std::fprintf(stderr, "ds4: RAM store: MEM_LARGE_PAGES failed (err %lu) - falling back to 4 KB pages\n",
                                  (unsigned long) GetLastError());
@@ -138,6 +168,12 @@ public:
         io_.reset();
         for (size_t i = 0; i < chunks_.size(); ++i)
             if (cfg_.unmap_chunk && chunk_dev_[i] != nullptr) cfg_.unmap_chunk(chunks_[i].first);
+#if defined(_WIN32)
+        if (!large_pieces_.empty()) {
+            for (void* q : large_pieces_) VirtualFree(q, 0, MEM_RELEASE);
+            return;
+        }
+#endif
         os::range_release(arena_, arena_bytes_);
     }
 
@@ -282,6 +318,52 @@ public:
         }
         return n;
     }
+    /// A slot for (layer, e) that the caller fills with the expert's blob itself (an expert the VRAM cache gives back to the CPU lane: its bytes
+    /// are in memory already, so no read from the SSD while the lane waits).  Returns the blob's address, or nullptr (it is here already, or
+    /// no slot can be had).  The slot is pinned and not findable until put_done().
+    uint8_t* put_begin(int layer, int e) {
+        if (layer < 0 || layer >= (int) geo_.size() || e < 0 || e >= geo_[(size_t) layer].n_exp) return nullptr;
+        std::lock_guard<std::mutex> lk(mu_);
+        if (where_[(size_t) layer][(size_t) e] >= 0) return nullptr;
+        const int s = take_slot(false);
+        if (s < 0) return nullptr;
+        Slot& sp = slots_[(size_t) s];
+        if (sp.layer >= 0 && sp.expert >= 0) {
+            where_[(size_t) sp.layer][(size_t) sp.expert] = -1;
+            if (sp.prefetch) st_.prefetch_wasted.fetch_add(1, std::memory_order_relaxed);
+            st_.evictions.fetch_add(1, std::memory_order_relaxed);
+        }
+        sp.layer = layer;
+        sp.expert = e;
+        sp.pin = 1;
+        sp.prefetch = false;
+        sp.visible = false;
+        sp.tick = ++clock_;
+        sp.bad.store(false);
+        sp.cancel.store(false);
+        sp.left.store(1, std::memory_order_release);
+        sp.state.store(kLoading, std::memory_order_release);
+        where_[(size_t) layer][(size_t) e] = s;
+        st_.put.fetch_add(1, std::memory_order_relaxed);
+        return sp.base;
+    }
+    void put_done(int layer, int e, bool ok) {
+        std::lock_guard<std::mutex> lk(mu_);
+        const int s = where_[(size_t) layer][(size_t) e];
+        if (s < 0) return;
+        Slot& sp = slots_[(size_t) s];
+        if (sp.pin > 0) sp.pin--;
+        if (ok) {
+            sp.left.store(0, std::memory_order_release);
+            sp.state.store(kReady, std::memory_order_release);
+        } else {
+            where_[(size_t) layer][(size_t) e] = -1;
+            sp.layer = sp.expert = -1;
+            sp.left.store(0, std::memory_order_release);
+            sp.state.store(kFree, std::memory_order_release);
+            free_hint_ = std::min<size_t>(free_hint_, (size_t) s);
+        }
+    }
     /// Guesses still waiting in the queue for a layer the token is past: dropped unread (their slots free once the queue has gone by)
     void cancel_stale(int layer_now) {
         std::lock_guard<std::mutex> lk(mu_);
@@ -402,6 +484,29 @@ public:
         std::lock_guard<std::mutex> lk(mu_);
         const int s = where_[(size_t) layer][(size_t) e];
         if (s >= 0) slots_[(size_t) s].visible = false;
+    }
+    /// An expert a GPU holds now (DS4_WHOLE_EXPERT): its slot, when idle (ready, unpinned, not visible), is free for the CPU
+    /// lane's experts at once instead of waiting for the policy to age it out.  Returns true if a slot was freed.
+    bool forget(int layer, int e) {
+        if (layer < 0 || layer >= (int) where_.size()) return false;
+        std::lock_guard<std::mutex> lk(mu_);
+        const int s = where_[(size_t) layer][(size_t) e];
+        if (s < 0) return false;
+        Slot& sp = slots_[(size_t) s];
+        if (sp.pin > 0 || sp.visible || sp.state.load(std::memory_order_acquire) != kReady) return false;
+        where_[(size_t) layer][(size_t) e] = -1;
+        sp.layer = sp.expert = -1;
+        sp.prefetch = false;
+        sp.state.store(kFree, std::memory_order_release);
+        free_hint_ = std::min(free_hint_, (size_t) s);
+        return true;
+    }
+    /// (DS4_WHOLE_PULL) a slot's blob on the host, and the arena's registered chunks: another GPU's address of a slot is its
+    /// own mapping of the chunk (cudaHostGetDevicePointer on that device) plus the blob's offset in it
+    const uint8_t* host_blob(int s) const { return s >= 0 && (size_t) s < nalloc_ ? slots_[(size_t) s].base : nullptr; }
+    std::vector<std::pair<void*, size_t>> chunks_copy() {   // (under the lock: grow() appends from the reader threads)
+        std::lock_guard<std::mutex> lk(mu_);
+        return chunks_;
     }
     size_t visible_count() const {
         size_t n = 0;
@@ -559,6 +664,7 @@ private:
     size_t slot_bytes_ = 0, nmax_ = 0, nalloc_ = 0, free_hint_ = 0, arena_bytes_ = 0;
     uint8_t* arena_ = nullptr;
     size_t large_ = 0;   // (Windows, DS4_STORE_LARGE=1: the arena's bytes in one MEM_LARGE_PAGES allocation; 0: 4 KB pages)
+    std::vector<void*> large_pieces_;   // (the large-page arena's 1 GB pieces when one allocation failed; empty otherwise)
     size_t shrunk_ = 0;
     std::unique_ptr<Slot[]> slots_;
     std::vector<std::pair<void*, size_t>> chunks_;
