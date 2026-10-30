@@ -186,6 +186,15 @@ Model licenses (DeepSeek etc.) apply to the weights and are between you and the 
 
 ## Run it
 
+### Easiest: the StrataRig release (no compiler)
+
+Download **[StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1)**,
+extract it and run `Setup.bat`. It installs official Strata if you don't have it, lets Strata set up DeepSeek once,
+checks that Strata's engine is 0.1.54, then installs the patched engine and the abliteration adapter. Start with
+`%LOCALAPPDATA%\StrataRig\Start-DeepSeek-Rig.bat`. Built for RTX 30, 40 and 50 (sm_86, sm_89, sm_120 + PTX).
+When Strata updates its engine, the launchers fall back to the official engine until a matching release is out.
+Details: [windows/release/README.md](windows/release/README.md).
+
 ### Build it yourself (current: engine 0.1.54)
 
 The full walkthrough, including the one-time large-pages privilege, is in
