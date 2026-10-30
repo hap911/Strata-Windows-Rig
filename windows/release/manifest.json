@@ -1,0 +1,10 @@
+{
+  "release": "StrataRig-0.1.54-r1",
+  "engine_version": "0.1.54",
+  "strata_version": "0.2.8",
+  "archs": ["sm_86", "sm_89", "sm_120", "compute_120"],
+  "gpus": "NVIDIA RTX 30 (sm_86), RTX 40 (sm_89), RTX 50 (sm_120); newer cards via PTX",
+  "min_driver": "580.65",
+  "model": "IST-DAS-2.00bpw",
+  "source": "https://github.com/hap911/Strata-Windows-Rig (branch windows-rig)"
+}
