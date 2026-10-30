@@ -53,7 +53,8 @@ What changed in this update: [Notes — 2026-10-30](#notes--2026-10-30-upstream-
 
 | Part | What's in it | Role |
 |---|---|---|
-| CPU | AMD Threadripper 3960X, 24 cores / 48 threads (Zen 2) | the CPU expert lane: experts that fit in neither GPU, 48 threads |
+| CPU | AMD Threadripper 3960X, 24 cores / 48 threads (Zen 2, launched 2019) | the CPU expert lane: experts that fit in neither GPU, 48 threads |
+| Platform | TRX40, **PCIe 4.0** (no PCIe 5.0), quad-channel **DDR4** (~77 GB/s measured read, AIDA64) | GPU ↔ RAM traffic and the CPU lane both run on this |
 | RAM | 192 GB DDR4 | 135 GB expert cache (`--ssd-cache 135`), optionally on 2 MB large pages |
 | GPU 0 | NVIDIA RTX 3080 Ti, 12 GB — also drives the desktop | layers 0–13 + vision tower, ~680 experts in VRAM, 900 MiB kept free for Windows |
 | GPU 1 | NVIDIA RTX 5090, 32 GB | layers 14–39 + output head, ~2,800 experts in VRAM |
@@ -62,6 +63,10 @@ What changed in this update: [Notes — 2026-10-30](#notes--2026-10-30-upstream-
 
 The model: DeepSeek-V4.1-Flash-1017, 763B parameters (~16B active per token), IST-DAS IQ2_XXS 2.00 bpw.
 Roughly 30 GB of its 250 GB sit in VRAM, ~100 GB in RAM; every token routes through all three.
+
+None of this is new hardware: a 2019 Zen 2 CPU, DDR4 and PCIe 4.0. The 5090 runs at PCIe 4.0 x16, and
+about half of each token's time is the CPU lane reading experts from DDR4. Newer platforms (DDR5,
+PCIe 5.0, newer CPUs) should be faster still; not measured.
 
 ## How fast, step by step
 
