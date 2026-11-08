@@ -1,7 +1,8 @@
 @echo off
 rem RECOMMENDED daily driver: DeepSeek-V4.1-Flash ABLITERATED, rig engine, decode as CUDA graphs, large pages.
-rem Measured on the reference rig (6-turn coding conversation, 400 tokens a turn): ~80 s total, decode ~38 tok/s
-rem (up to 42.6 with 184K tokens in context), vs ~26-27 tok/s without graphs and ~119 s for the plain launcher.
+rem Measured on the reference rig (6-turn coding conversation, 400 tokens a turn, engine 0.1.58): decode
+rem ~34.5 tok/s average with the desktop in use (30.8-37.4; ~38 quiet), ~85 s; prompts ~399 tok/s; without
+rem graphs ~26-27. reserve-mib=1200,100 keeps the desktop card out of memory pressure (at 900: decode 24.5).
 rem   DS4_ATTN_GRAPH=1   each decode layer's GPU work as CUDA graphs (byte-identical output; delete the line to turn off)
 rem   DS4_SETTLE_MS=0    no pause after each prompt (~-9% on multi-turn work)
 rem   DS4_STORE_LARGE=1  RAM store on 2 MB large pages (needs grant-lock-pages.bat once; no measured speed change -

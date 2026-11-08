@@ -215,9 +215,11 @@ switch ($Command) {
     "restore" {
         $eng = Get-Engine
         if (-not $eng) { Say "no DeepSeek engine installed"; break }
-        $bak = Join-Path $eng.Dir "strata-dsv41.exe.official"
-        if (-not (Test-Path $bak)) { Say "no saved official engine in $($eng.Dir)"; break }
+        $off = Join-Path $RigHome ("official\" + $eng.Version)
+        $bak = Join-Path $off "strata-dsv41.exe"
+        if (-not (Test-Path $bak)) { Say "no saved official engine for $($eng.Version) in $off"; break }
         Copy-Item $bak (Join-Path $eng.Dir "strata-dsv41.exe") -Force
+        if (Test-Path (Join-Path $off "strata_kq.dll")) { Copy-Item (Join-Path $off "strata_kq.dll") (Join-Path $eng.Dir "strata_kq.dll") -Force }
         Say "official engine $($eng.Version) restored"
     }
 }

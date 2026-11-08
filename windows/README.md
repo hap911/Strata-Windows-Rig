@@ -18,14 +18,15 @@ NVMe. It will run on less (single GPU, 128 GB RAM) at lower speed; the `--ssd-ca
 **Current base: upstream Strata 0.2.12 / DeepSeek engine 0.1.58** (rebased 2026-11-08). The engine
 has CUDA-graph decode (~34.5 tok/s average on the reference rig with the desktop in use, ~38 on a quiet
 desktop; up from ~26–30). What changed:
-[root README notes](../README.md#notes--2026-11-08-upstream-0212--engine-0158).
+[root README notes](../README.md#notes--2026-11-08-upstream-0212--engine-0158-and-the-desktop-card-reserve).
 
 ## Quick path: the StrataRig release (no compiler)
 
-Download [StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1),
+Download [StrataRig-0.1.58-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.58-r1),
 extract it and run `Setup.bat`. It installs official Strata if missing, lets Strata set up DeepSeek once, checks the
-engine version (0.1.54) and installs the patched engine and adapter. Details:
-[release/README.md](release/README.md).
+engine version (0.1.58) and installs the patched engine and adapter. Details:
+[release/README.md](release/README.md). The older [StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1)
+remains for engine 0.1.54 users.
 
 The rest of this page is the manual build and tuning walkthrough.
 
