@@ -10,13 +10,13 @@ snapshot, not a stable or production-ready release. Test it in an isolated envir
 respective authors; this notice does not claim authorship of their work.
 
 **A 763-billion-parameter model, uncensored, with vision, at 262K context — chatting at ~38 tokens
-per second on a desktop PC.** No datacenter. No API bill. One RTX 5090, one RTX 3080 Ti, 192 GB of
+per second on a desktop PC (~34.5 with the desktop in use).** No datacenter. No API bill. One RTX 5090, one RTX 3080 Ti, 192 GB of
 RAM, and a pile of patches on top of [Strata](https://github.com/Niko1221/Strata).
 
-This snapshot is the exact state my machine runs: **upstream Strata 0.2.8 / DeepSeek engine 0.1.54**
+This snapshot is the exact state my machine runs: **upstream Strata 0.2.12 / DeepSeek engine 0.1.58**
 plus the patches below. The engine patches are included in this source snapshot; the Windows scripts,
 presets and docs live in [`windows/`](windows/). Model weights are **not** in this repo — links below.
-What changed in this update: [Notes — 2026-10-30](#notes--2026-10-30-upstream-028--engine-0154-cuda-graphs).
+What changed in this update: [Notes — 2026-11-08](#notes--2026-11-08-upstream-0212--engine-0158-and-the-desktop-card-reserve).
 
 > [!WARNING]
 > ## Legal disclaimer — authorized research only
@@ -56,10 +56,10 @@ What changed in this update: [Notes — 2026-10-30](#notes--2026-10-30-upstream-
 | CPU | AMD Threadripper 3960X, 24 cores / 48 threads (Zen 2, launched 2019) | the CPU expert lane: experts that fit in neither GPU, 48 threads |
 | Platform | TRX40, **PCIe 4.0** (no PCIe 5.0), quad-channel **DDR4** (~77 GB/s measured read, AIDA64) | GPU ↔ RAM traffic and the CPU lane both run on this |
 | RAM | 192 GB DDR4 | 135 GB expert cache (`--ssd-cache 135`), optionally on 2 MB large pages |
-| GPU 0 | NVIDIA RTX 3080 Ti, 12 GB — also drives the desktop | layers 0–13 + vision tower, ~680 experts in VRAM, 900 MiB kept free for Windows |
+| GPU 0 | NVIDIA RTX 3080 Ti, 12 GB — also drives the desktop | layers 0–13 + vision tower, ~680 experts in VRAM, **1200 MiB** kept free for Windows (measured: 900 MiB let a browser push it into memory pressure) |
 | GPU 1 | NVIDIA RTX 5090, 32 GB | layers 14–39 + output head, ~2,800 experts in VRAM |
 | Storage | NVMe SSD | the 249 GB model file; experts not in RAM or VRAM are read from it |
-| OS / software | Windows 11 Pro, Strata 0.2.8 (DeepSeek engine 0.1.54) + this repo's patches, CUDA 13 | |
+| OS / software | Windows 11 Pro, Strata 0.2.12 (DeepSeek engine 0.1.58) + this repo's patches, CUDA 13, NVIDIA driver 621.01 | |
 
 The model: DeepSeek-V4.1-Flash-1017, 763B parameters (~16B active per token), IST-DAS IQ2_XXS 2.00 bpw.
 Roughly 30 GB of its 250 GB sit in VRAM, ~100 GB in RAM; every token routes through all three.
@@ -75,7 +75,8 @@ PCIe 5.0, newer CPUs) should be faster still; not measured.
 | Strata out of the box (default settings, auto layer split, engine 0.1.51) | **19.4 tok/s** | `bench_ds.py`, single 21K-token prompt |
 | Strata tuned with settings only (`--ssd-cache 120`, `--prefill-chunk 4096`, `--cpu-threads 48`) | **29.1 tok/s** | same |
 | + patched engine, `DS4_SPLIT=14,26`, large pages (previous launcher) | ~26 tok/s, 6-turn test ~119 s | 6-turn coding conversation |
-| **+ CUDA graphs, fused CPU lane, IQ1_M fix, no prompt settle (this update)** | **~38 tok/s** (up to 42.4), 6-turn test **~80 s** | same 6-turn conversation |
+| **+ CUDA graphs, fused CPU lane, IQ1_M fix, no prompt settle (2026-10-30 update)** | **~38 tok/s** (up to 42.4), 6-turn test **~80 s** | same 6-turn conversation |
+| **Rebased onto engine 0.1.58 + reserve `1200,100` (2026-11-08)** | **~34.5 tok/s** with the desktop in use (30.8–37.4), ~38 quiet; prompts ~399 tok/s; 6-turn **~85 s** | same |
 
 The two methods are not comparable with each other: `bench_ds.py` measures one long fresh prompt,
 the 6-turn test a realistic multi-turn coding session with a warming expert cache (prompts of 2.7K then
@@ -97,13 +98,13 @@ conversation cache). Both GPUs nearly full (42.9 / 44 GB), the 5090 on a **PCIe 
 |---|---|
 | Size | 763B total / ~16B active MoE, 2.00 bpw (IQ2_XXS, 249 GB) |
 | Context | 262,144 tokens |
-| Decode, single stream | **~38 tok/s** average over a 6-turn conversation (37.4–38.7), **up to 42.4 tok/s** on warmed-up turns; was ~26–30 before the CUDA-graph patch |
-| 6-turn coding conversation (2.7K + 5×0.2K prompt tokens, 6×400 generated) | **~80 s** total (was ~119 s with the previous launcher) |
-| Prefill, maximum in local serve log | **772.1 tok/s** (engine 0.1.51; the patches here do not change prompt speed) |
+| Decode, single stream | **~38 tok/s** average over a 6-turn conversation on a quiet desktop, **~34.5 with the desktop in use** (30.8–37.4); was ~26–30 before the CUDA-graph patch |
+| 6-turn coding conversation (2.7K + 5×0.2K prompt tokens, 6×400 generated) | **~85 s** total with the desktop in use (was ~80 quiet, ~119 s with the previous launcher) |
+| Prefill, maximum in local serve log | **772.1 tok/s** (engine 0.1.51; the patches here do not change prompt speed). Today's 2736-token prompt reads at **398.9 tok/s** |
 | Refusals | abliterated at runtime (see below) |
 | Vision | **yes — native tower on the 3080 Ti** (upstream ships it since 0.2.7; was patched in on 0.1.51) |
 | Multi-client | serial queue |
-| Engine base | upstream Strata 0.2.8 / DeepSeek engine 0.1.54 + the patches below |
+| Engine base | upstream Strata 0.2.12 / DeepSeek engine 0.1.58 + the patches below |
 
 Measured on: Windows 11, Threadripper 3960X (24c/48t), 192 GB DDR4, RTX 5090 32 GB +
 RTX 3080 Ti 12 GB (drives the desktop), NVMe. The decode and 6-turn numbers are from
@@ -137,9 +138,11 @@ reversible by launching without the flag.
 This build is meant only for authorized security research and defensive testing under the legal
 disclaimer above. You are responsible for what you generate.
 
-## The engine patches (this snapshot vs upstream 0.2.8 / engine 0.1.54)
+## The engine patches (this snapshot vs upstream 0.2.12 / engine 0.1.58)
 
-All of these are opt-in or keep upstream behaviour when unused.
+All of these are opt-in or keep upstream behaviour when unused. Rebased onto 0.2.12 on 2026-11-08: 86 of
+95 changes applied unchanged, 9 merged by hand where upstream extracted the attention body into
+`attn_core()`; CUDA graphs still byte-identical (128,000 parts checked).
 
 1. **`--ablate`** — runtime abliteration adapters (port of project-maya PR #469, MIT).
 2. **`--reserve-mib N,M,...`** — per-GPU VRAM reserves in device order, so the 3080 Ti that also
@@ -154,8 +157,8 @@ All of these are opt-in or keep upstream behaviour when unused.
    ran ~25 tiny dependent kernels, ~1,000 per token, each paying ~10 µs of launch and ramp-up. Each
    layer's GPU work (attention, routing + shared expert, expert gate/up, the CPU-lane wait, down and
    combine) is now captured once per token into CUDA graphs and launched as one unit. Verified
-   byte-identical with `DS4_ATTN_GRAPH_CHECK=1`: 98,000 graph-launched parts re-run as plain launches
-   and compared byte for byte, 0 differences.
+   byte-identical with `DS4_ATTN_GRAPH_CHECK=1`: 128,000 graph-launched parts re-run as plain launches
+   and compared byte for byte, 0 differences (0.1.58 rebase).
 5. **Fused CPU expert lane** (default on, `DS4_LANE_FUSE=0` turns it off): each CPU-lane expert's
    down projection starts as soon as its own gate/up is done, instead of waiting for all of them.
    ~9% faster per lane call, same bits.
@@ -172,9 +175,11 @@ The old native-vision server patch ([windows/patches/ds4-native-vision-0.1.51.pa
 is no longer needed: upstream Strata ships DeepSeek vision itself since 0.2.7. It is kept for history.
 
 Plus the environment levers that don't need code: `DS4_SPLIT=14,26` layer split rebalanced toward
-the 5090 (29.9 vs 28.6 tok/s on the engine's auto split, measured on 0.1.51), `--ssd-cache 135` (keeps the CPU-lane
+the 5090 (29.9 vs 28.6 tok/s on the engine's auto split, measured on 0.1.51; still best on 0.1.58 —
+8,32 and 6,34 measured 30.3/28.4), `--ssd-cache 135` (keeps the CPU-lane
 experts in RAM instead of re-reading them from SSD; 120 measured the same or up to ~4% slower),
-`--prefill-chunk 4096`, `--cpu-threads 48`, High performance power plan.
+`--prefill-chunk 4096`, `--cpu-threads 48`, `--reserve-mib=1200,100` (the desktop card's headroom),
+High performance power plan.
 
 ## Vision that actually works
 
@@ -202,14 +207,14 @@ Model licenses (DeepSeek etc.) apply to the weights and are between you and the 
 
 ### Easiest: the StrataRig release (no compiler)
 
-Download **[StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1)**,
+Download **[StrataRig-0.1.58-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.58-r1)**,
 extract it and run `Setup.bat`. It installs official Strata if you don't have it, lets Strata set up DeepSeek once,
-checks that Strata's engine is 0.1.54, then installs the patched engine and the abliteration adapter. Start with
+checks that Strata's engine is 0.1.58, then installs the patched engine and the abliteration adapter. Start with
 `%LOCALAPPDATA%\StrataRig\Start-DeepSeek-Rig.bat`. Built for RTX 30, 40 and 50 (sm_86, sm_89, sm_120 + PTX).
 When Strata updates its engine, the launchers fall back to the official engine until a matching release is out.
 Details: [windows/release/README.md](windows/release/README.md).
 
-### Build it yourself (current: engine 0.1.54)
+### Build it yourself (current: engine 0.1.58)
 
 The full walkthrough, including the one-time large-pages privilege, is in
 **[windows/README.md](windows/README.md)**. The short version, from a clone of this repo:
@@ -227,9 +232,18 @@ rem daily driver (CUDA graphs on)
 windows\run-deepseek-abliterated-largepages-graphs.bat
 ```
 
-The launchers find Strata's current engine folder themselves, so an engine update no longer breaks
-them — but the update replaces the engine, so run `build-strata-engine.bat install` again (after a
-rebuild if the engine version changed). `windows\restore-official-engine.bat` puts the official exe back.
+The launchers find Strata's current engine folder themselves and re-apply the rig build at every start.
+The rig build lives in `windows\rig\engine\<version>\` — **outside Strata's folders**, so an engine update
+cannot delete it. After an engine update the launchers run the official engine with a message instead of
+swapping in a mismatched build; rebuild for the new version and run `build-strata-engine.bat install`
+again to get the patches back. `windows\restore-official-engine.bat` puts the official exe back.
+
+### Notes on Strata's own updates
+
+`strata launch` does not update the engine by itself unless it is older than Strata's `MIN_ENGINE`
+(0.1.46) — a rig build reports 0.1.58, so launches leave it alone. `strata update` is the explicit step
+that replaces it; after that the launchers behave as above. To hold the engine at its version, point
+Strata at a local signed feed (`STRATA_UPDATE_FEED=<dir>`).
 
 ## Notes — 2026-10-30: upstream 0.2.8 / engine 0.1.54, CUDA graphs
 
@@ -250,3 +264,30 @@ rebuild if the engine version changed). `windows\restore-official-engine.bat` pu
   look up the engine folder instead of hard-coding the version; reserves are now `900,100`.
 - The full research journal (timing chain, every A/B, dead ends) is in
   [windows/docs/CUDA-GRAPHS-2026-10-30.md](windows/docs/CUDA-GRAPHS-2026-10-30.md).
+
+## Notes — 2026-11-08: upstream 0.2.12 / engine 0.1.58, and the desktop-card reserve
+
+- **What broke:** Strata updated its engine to 0.1.58 and deleted the 0.1.54 folder, which held the
+  patched exe. The source patches were intact; only the installed binaries were gone.
+- **Rebased onto upstream Strata 0.2.12 (engine 0.1.58):** 86 of 95 changes applied unchanged, 9 merged
+  by hand where upstream moved the attention body into a new `attn_core()` and renamed its locals. Two
+  port slips (a misplaced closing fragment, a changed return type in `cache_queue()`) surfaced in the
+  build and were fixed. It builds for sm_86, sm_89 (RTX 40), sm_120 + PTX. Graph check: **128,000
+  parts, 0 differences**.
+- **Update-proof install:** the rig build now lives in `windows\rig\engine\<version>\` (outside Strata's
+  folders, which updates delete) and the launchers re-apply it at every start, after checking the folder
+  version. A mismatch starts the official engine with a message instead of crashing the preset.
+- **The speed loss was not the port.** Same-day old-vs-new: old 27.3 tok/s (chain 37.0 ms/token),
+  new 28.5 (34.8). The chain showed the **3080 Ti's (desktop card) kernel gaps grew 4.68 → 11.65
+  ms/token**; with the browser open at a 900 MiB reserve, CUDA0 had only 204 MiB free and the desktop's
+  memory pressure stalled its kernels (and the 5090's graph launches behind them).
+- **The fix:** `--reserve-mib=1200,100` (1.2 GB left on the desktop card). Same split 14,26, same
+  build: **30.8–37.4 tok/s (avg 34.5)**, GPU0 gaps 7.02 → 6.86 (with the monitor now at 60 Hz), GPU1
+  6.31; graphs active again. Splits 8,32 (30.3) and 6,34 (28.4) are worse — GPU0 gaps stay high
+  (compositor interleaving, not layer count) and the CPU lane's share grows (11.0/12.8 vs 7.2).
+  On a quiet desktop the 2026-10-30 ~38 tok/s remains reachable; prompts read faster than then
+  (398.9 tok/s on the 2736-token prompt).
+- **Launchers:** all four now use `windows\rig\use-rig-engine.bat`; reserves are `1200,100`; the graphs
+  launcher stays the daily driver. The previous release `StrataRig-0.1.54-r1` remains available for
+  engine 0.1.54 users.
+- The research journal for this rebase is in [windows/docs/CUDA-GRAPHS-2026-11-08.md](windows/docs/CUDA-GRAPHS-2026-11-08.md) (the 2026-10-30 journal stays too).

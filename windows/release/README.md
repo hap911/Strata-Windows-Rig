@@ -1,8 +1,9 @@
-# StrataRig 0.1.54-r1 — patched DeepSeek engine for Strata
+# StrataRig 0.1.58-r1 — patched DeepSeek engine for Strata 0.2.12
 
 Runs DeepSeek-V4.1-Flash-1017 (763B, IST-DAS 2.00 bpw) through [Strata](https://github.com/Niko1221/Strata)
-with this repo's engine patches: CUDA-graph decode (~38 tok/s on the reference rig, vs ~26–29 tuned
-stock), runtime abliteration (`--ablate`), per-GPU VRAM reserves, a faster CPU expert lane.
+with this repo's engine patches: CUDA-graph decode (~34.5 tok/s on the reference rig with the desktop in
+use, ~38 on a quiet desktop, vs ~26–29 tuned stock), runtime abliteration (`--ablate`), per-GPU VRAM
+reserves, a faster CPU expert lane.
 
 **Experimental, authorized research only** — read the
 [legal disclaimer](https://github.com/hap911/Strata-Windows-Rig#legal-disclaimer--authorized-research-only).
@@ -21,9 +22,10 @@ stock), runtime abliteration (`--ablate`), per-GPU VRAM reserves, a faster CPU e
 2. Double-click **`Setup.bat`**. It:
    - installs official Strata if you don't have it (asks first; the official one-line installer, no admin rights),
    - lets Strata download and set up DeepSeek once if it hasn't yet (asks first; ~250 GB),
-   - checks that Strata's DeepSeek engine is **0.1.54** — the version this build is made for — and changes
+   - checks that Strata's DeepSeek engine is **0.1.58** — the version this build is made for — and changes
      nothing if it isn't,
-   - stores the patched engine in `%LOCALAPPDATA%\StrataRig`, backs up Strata's official engine exe once,
+   - stores the patched engine in `%LOCALAPPDATA%\StrataRig\engine\0.1.58` (outside Strata's folders, so an
+     engine update cannot delete it), and saves the official exe+dll there as `StrataRig\official\0.1.58`,
    - downloads the abliteration adapter (459 MB, MIT, SHA-256 checked),
    - writes `%LOCALAPPDATA%\StrataRig\StrataRig.config.json` sized to your RAM and CPU.
 3. Start with **`%LOCALAPPDATA%\StrataRig\Start-DeepSeek-Rig.bat`** (abliterated) or
@@ -33,7 +35,7 @@ stock), runtime abliteration (`--ablate`), per-GPU VRAM reserves, a faster CPU e
 ## When Strata updates
 
 Strata updates its engine by itself. Each start checks the version: if Strata's engine is no longer
-0.1.54, the launcher **does not** swap in this build and runs Strata's official engine instead (no
+0.1.58, the launcher **does not** swap in this build and runs Strata's official engine instead (no
 abliteration, no speed-ups) and tells you so. Install the matching StrataRig release from
 [Releases](https://github.com/hap911/Strata-Windows-Rig/releases) to get them back.
 `Restore-Official-Engine.bat` puts Strata's official engine back at any time.
@@ -45,13 +47,13 @@ abliteration, no speed-ups) and tells you so. Install the matching StrataRig rel
 | `ssd_cache_gb` | RAM − 56 GB, max 135 | RAM cache for experts that fit in no GPU — the biggest speed lever |
 | `cpu_threads` | logical CPUs | CPU expert lane threads |
 | `context` | `256k` | context window; Strata's `256k` = 262,144 tokens (Strata also offers `512k` and `1m` for this model; more context needs more VRAM and RAM) |
-| `reserve_mib` | (Strata default) | VRAM to leave free, per GPU: `"900,100"` keeps 900 MiB on a desktop GPU |
+| `reserve_mib` | (Strata default) | VRAM to leave free, per GPU: `"1200,100"` keeps 1.2 GB on a GPU that also drives the desktop (measured: at 900 MiB the desktop's browser pushed the card into memory pressure and decode fell from ~34.5 to ~24.5 tok/s) |
 | `ds4_split` | (engine's own) | layers per GPU, e.g. `"14,26"` for a 12 GB + 32 GB pair |
 | `cuda_graphs` | `true` | CUDA-graph decode, the main speed-up (byte-identical output) |
 | `large_pages` | `false` | 2 MB pages for the RAM cache; needs "Lock pages in memory"; no measured gain |
 
 Reference settings (RTX 3080 Ti + RTX 5090, 192 GB, Threadripper 3960X): `ssd_cache_gb` 135,
-`cpu_threads` 48, `reserve_mib` "900,100", `ds4_split` "14,26".
+`cpu_threads` 48, `reserve_mib` "1200,100", `ds4_split` "14,26".
 
 ## What's in the zip
 

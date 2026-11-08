@@ -85,10 +85,15 @@ function Use-Patched {
     }
     $src = Join-Path $RigHome ("engine\" + $Manifest.engine_version)
     if (-not (Test-Path (Join-Path $src "strata-dsv41.exe"))) { Install-Engine $eng }
-    $bak = Join-Path $eng.Dir "strata-dsv41.exe.official"
+    $off = Join-Path $RigHome ("official\" + $Manifest.engine_version)
+    New-Item -ItemType Directory -Force $off | Out-Null
+    $bak = Join-Path $off "strata-dsv41.exe"
     if (-not (Test-Path $bak)) {
         $exe = Join-Path $eng.Dir "strata-dsv41.exe"
-        if ((Get-FileHash $exe -Algorithm SHA256).Hash -ieq $eng.OfficialSha) { Copy-Item $exe $bak }
+        if ((Get-FileHash $exe -Algorithm SHA256).Hash -ieq $eng.OfficialSha) {
+            Copy-Item $exe $bak
+            Copy-Item (Join-Path $eng.Dir "strata_kq.dll") (Join-Path $off "strata_kq.dll")
+        }
     }
     Copy-Item (Join-Path $src "strata-dsv41.exe") (Join-Path $eng.Dir "strata-dsv41.exe") -Force
     Copy-Item (Join-Path $src "strata_kq.dll") (Join-Path $eng.Dir "strata_kq.dll") -Force
@@ -107,7 +112,7 @@ function New-Config {
         ssd_cache_gb    = $cache
         cpu_threads     = $threads
         prefill_chunk   = 4096
-        reserve_mib     = ""          # e.g. "900,100" - per GPU, in Strata's GPU order; empty = Strata's default
+        reserve_mib     = ""          # e.g. "1200,100" - per GPU, in Strata's GPU order; empty = Strata's default
         ds4_split       = ""          # e.g. "14,26" for a 12 GB + 32 GB pair; empty = the engine's own split
         large_pages     = $false      # needs "Lock pages in memory"; measured no speed gain
         cuda_graphs     = $true       # DS4_ATTN_GRAPH=1, the main speed-up
