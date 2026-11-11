@@ -78,13 +78,25 @@ function Install-Engine($eng) {
 function Use-Patched {
     $eng = Get-Engine
     if (-not $eng) { Say "no DeepSeek engine installed by Strata yet - run setup."; return $false }
-    if ($eng.Version -ne $Manifest.engine_version) {
-        Say "Strata's DeepSeek engine is $($eng.Version), this StrataRig build is for $($Manifest.engine_version)."
-        Say "Running Strata's OFFICIAL engine (no abliteration, no speed-ups). Get a matching release: https://github.com/hap911/Strata-Windows-Rig/releases"
+    # POLICY: when Strata's engine version differs, the NEWEST StrataRig engine build runs in that folder anyway.
+    # The rig engine accepts the Terminal's command line; verified against a newer folder. Re-porting onto the
+    # newer upstream is optional, not required.
+    $src = Join-Path $RigHome ("engine\" + $Manifest.engine_version)
+    $rigver = $Manifest.engine_version
+    if (-not (Test-Path (Join-Path $src "strata-dsv41.exe"))) {
+        $newest = Get-ChildItem (Join-Path $RigHome "engine") -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object { [version]($_.Name) } -Descending | Select-Object -First 1
+        if ($newest -and (Test-Path (Join-Path $newest.FullName "strata-dsv41.exe"))) {
+            $src = $newest.FullName; $rigver = $newest.Name
+        }
+    }
+    if (-not (Test-Path (Join-Path $src "strata-dsv41.exe"))) {
+        Say "no StrataRig engine build at all in $RigHome\engine - running Strata's OFFICIAL engine (no abliteration, no speed-ups)."
         return $false
     }
-    $src = Join-Path $RigHome ("engine\" + $Manifest.engine_version)
-    if (-not (Test-Path (Join-Path $src "strata-dsv41.exe"))) { Install-Engine $eng }
+    if ($rigver -ne $eng.Version) {
+        Say "StrataRig engine $rigver runs in Strata's $($eng.Version) folder (same command line; re-port onto $($eng.Version) is optional)."
+    }
     $off = Join-Path $RigHome ("official\" + $Manifest.engine_version)
     New-Item -ItemType Directory -Force $off | Out-Null
     $bak = Join-Path $off "strata-dsv41.exe"
@@ -155,7 +167,7 @@ switch ($Command) {
         }
         Say "Strata's DeepSeek engine: $($eng.Version) in $($eng.Dir)"
         if ($eng.Version -ne $Manifest.engine_version) {
-            throw "This StrataRig build is for engine $($Manifest.engine_version), Strata has $($eng.Version). Get the matching release: https://github.com/hap911/Strata-Windows-Rig/releases (nothing was changed)."
+            Say "Strata's engine is $($eng.Version), this release's build is for $($Manifest.engine_version). Installing anyway: the launchers run the newest StrataRig build in Strata's folder (the rig engine accepts the Terminal's command line)."
         }
         Install-Engine $eng
         if (-not $NoAdapter) {

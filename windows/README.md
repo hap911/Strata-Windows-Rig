@@ -15,18 +15,18 @@ Reference hardware: Threadripper 3960X 24c/48t, 192 GB RAM, RTX 5090 32 GB + RTX
 NVMe. It will run on less (single GPU, 128 GB RAM) at lower speed; the `--ssd-cache` size and
 `DS4_SPLIT` are the first things to retune.
 
-**Current base: upstream Strata 0.2.12 / DeepSeek engine 0.1.58** (rebased 2026-11-08). The engine
+**Current base: upstream Strata 0.2.13 / DeepSeek engine 0.1.59** (rebased 2026-11-11). The engine
 has CUDA-graph decode (~34.5 tok/s average on the reference rig with the desktop in use, ~38 on a quiet
 desktop; up from ~26–30). What changed:
-[root README notes](../README.md#notes--2026-11-08-upstream-0212--engine-0158-and-the-desktop-card-reserve).
+[root README notes](../README.md#notes--2026-11-11-upstream-0213--engine-0159-the-rig-runs-in-any-engine-folder).
 
 ## Quick path: the StrataRig release (no compiler)
 
-Download [StrataRig-0.1.58-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.58-r1),
-extract it and run `Setup.bat`. It installs official Strata if missing, lets Strata set up DeepSeek once, checks the
-engine version (0.1.58) and installs the patched engine and adapter. Details:
-[release/README.md](release/README.md). The older [StrataRig-0.1.54-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.54-r1)
-remains for engine 0.1.54 users.
+Download [StrataRig-0.1.59-r1](https://github.com/hap911/Strata-Windows-Rig/releases/tag/StrataRig-0.1.59-r1),
+extract it and run `Setup.bat`. It installs official Strata if missing, lets Strata set up DeepSeek once, installs the
+patched engine and adapter (if Strata's engine is a newer version, it installs anyway and warns - the launchers run the
+newest rig build in that folder). Details:
+[release/README.md](release/README.md). Older releases remain for their engine versions.
 
 The rest of this page is the manual build and tuning walkthrough.
 
@@ -127,8 +127,10 @@ server patch to apply anymore. The steps below are for the legacy 0.1.51 setup o
   the model needs (Strata's `MIN_ENGINE`, 0.1.46) — a rig build reports the version it was built from
   (0.1.58 now), so launches leave it alone.
 - `strata update` (or an app update) replaces the engine and deletes the old folder. That is a manual
-  step: after it, the launchers re-apply the matching rig build if it exists, or start the official
-  engine and say what to do. The rig builds live outside Strata's folders and are never lost.
+  step: after it, the launchers **run the newest rig build in the current folder anyway** (the rig engine
+  accepts the Terminal's command line, verified against a newer folder) and warn that the build is older.
+  So the patches keep working across upstream updates; re-porting onto the newest upstream is optional.
+  The rig builds live outside Strata's folders and are never lost.
 - If you want to hold the engine at its current version anyway, point Strata at a local feed with
   `STRATA_UPDATE_FEED=<dir>` (a signed feed folder); `strata update` then finds nothing newer there.
 

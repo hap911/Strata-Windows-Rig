@@ -1,4 +1,4 @@
-# StrataRig 0.1.58-r1 — patched DeepSeek engine for Strata 0.2.12
+# StrataRig 0.1.59-r1 — patched DeepSeek engine for Strata 0.2.13
 
 Runs DeepSeek-V4.1-Flash-1017 (763B, IST-DAS 2.00 bpw) through [Strata](https://github.com/Niko1221/Strata)
 with this repo's engine patches: CUDA-graph decode (~34.5 tok/s on the reference rig with the desktop in
@@ -22,10 +22,10 @@ reserves, a faster CPU expert lane.
 2. Double-click **`Setup.bat`**. It:
    - installs official Strata if you don't have it (asks first; the official one-line installer, no admin rights),
    - lets Strata download and set up DeepSeek once if it hasn't yet (asks first; ~250 GB),
-   - checks that Strata's DeepSeek engine is **0.1.58** — the version this build is made for — and changes
+   - checks that Strata's DeepSeek engine is **0.1.59** — the version this build is made for — and changes
      nothing if it isn't,
-   - stores the patched engine in `%LOCALAPPDATA%\StrataRig\engine\0.1.58` (outside Strata's folders, so an
-     engine update cannot delete it), and saves the official exe+dll there as `StrataRig\official\0.1.58`,
+   - stores the patched engine in `%LOCALAPPDATA%\StrataRig\engine\0.1.59` (outside Strata's folders, so an
+     engine update cannot delete it), and saves the official exe+dll there as `StrataRig\official\0.1.59`,
    - downloads the abliteration adapter (459 MB, MIT, SHA-256 checked),
    - writes `%LOCALAPPDATA%\StrataRig\StrataRig.config.json` sized to your RAM and CPU.
 3. Start with **`%LOCALAPPDATA%\StrataRig\Start-DeepSeek-Rig.bat`** (abliterated) or
@@ -34,11 +34,11 @@ reserves, a faster CPU expert lane.
 
 ## When Strata updates
 
-Strata updates its engine by itself. Each start checks the version: if Strata's engine is no longer
-0.1.58, the launcher **does not** swap in this build and runs Strata's official engine instead (no
-abliteration, no speed-ups) and tells you so. Install the matching StrataRig release from
-[Releases](https://github.com/hap911/Strata-Windows-Rig/releases) to get them back.
-`Restore-Official-Engine.bat` puts Strata's official engine back at any time.
+Strata updates its engine by itself. Each start checks the version: if Strata's engine is newer than
+0.1.58, the launcher runs the **newest StrataRig engine build in that folder anyway** (the rig engine
+accepts the Terminal's command line) and warns that the build is older. So the patched engine keeps
+running across upstream updates; install the matching StrataRig release when it exists for the newest
+engine. `Restore-Official-Engine.bat` puts Strata's official engine back at any time.
 
 ## Tuning (`StrataRig.config.json`)
 

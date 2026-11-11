@@ -14919,13 +14919,11 @@ struct Model::Impl {
                              d.id, il, part, cudaGetErrorString(ce));
             }
         }
-        static bool ag_reg = false;   // (once: print what the graphs cost to build and replay)
-        if (on && !ag_reg) {
-            ag_reg = true;
-            std::atexit([] {
+        if (on && launched) {   // (periodic: what the graphs cost to build and replay; atexit cannot take a member lambda)
+            static long long ag_n = 0;
+            if (++ag_n % 2000 == 0)
                 std::fprintf(stderr, "ds4: DS4_ATTN_GRAPH stats: instantiates %lld, param updates %lld, update failures %lld\n",
                              ag_inst.load(), ag_upd.load(), ag_upd_fail.load());
-            });
         }
         return launched ? true : body();
     }
