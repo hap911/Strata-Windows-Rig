@@ -14871,6 +14871,11 @@ struct Model::Impl {
             return r;
         }
         static const bool on = env_f("DS4_ATTN_GRAPH", 0.0f) != 0.0f;
+        // DS4_ATTN_GRAPH_NOCUBLAS=1: the parts whose lambda calls the F16 mv helper (cuBLAS) run plain.  Under
+        // CUDA 13.4's relaxed capture, cuBLAS's enqueue captures as an empty node whose count varies per call, so
+        // the graph's topology differs every token and cudaGraphExecUpdate fails (result 2) - 36% of launches -
+        // and the graph is rebuilt each token (host cost ~70 us a launch).  The parts without it (1/3/5) never fail.
+        static const bool nocublas = env_f("DS4_ATTN_GRAPH_NOCUBLAS", 0.0f) != 0.0f;
         const int key = (d.id * 1024 + il) * 4 + part;
         bool bad = false;
         if (on && T == 1 && !prof_window && !prof_chunk) {
@@ -14878,6 +14883,7 @@ struct Model::Impl {
             bad = ag_bad[key];
         }
         if (!on || T != 1 || prof_window || prof_chunk || bad) return body();
+        if (nocublas && (part == 0 || part == 2 || part == 4 || part == 6)) return body();
         if (cudaStreamBeginCapture(d.st, cudaStreamCaptureModeThreadLocal) != cudaSuccess) {
             cudaGetLastError();
             return body();
