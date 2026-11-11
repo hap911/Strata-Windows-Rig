@@ -14848,6 +14848,9 @@ struct Model::Impl {
     std::unordered_map<int, bool> ag_bad;
     std::atomic<long long> ag_checks{0}, ag_diffs{0};
     std::atomic<long long> ag_inst{0}, ag_upd{0}, ag_upd_fail{0};   // (DS4_ATTN_GRAPH: graph build/replay stats, printed at exit)
+    long long ag_fail_p[8] = {};   // (DS4_ATTN_GRAPH: update failures by part: which parts' topology varies a token)
+    bool ag_res_p[8] = {};   // (DS4_ATTN_GRAPH: the first update result code of each part, printed once)
+    double ag_ms_i = 0, ag_ms_u = 0, ag_ms_l = 0;   // (DS4_ATTN_GRAPH: host ms spent instantiating, updating, launching)
     template <class F>
     bool attn_graph(Dev& d, int il, int part, int T, F&& body, const void* chk = nullptr, size_t chk_bytes = 0) {
         // DS4_ATTN_GRAPH_CHECK=1: after each graph, the same part run again as plain launches (it only writes, from
@@ -14891,8 +14894,27 @@ struct Model::Impl {
         if (ok && ce == cudaSuccess && gr != nullptr) {
             if (ex != nullptr) {
                 cudaGraphExecUpdateResultInfo info;
-                if (cudaGraphExecUpdate(ex, gr, &info) != cudaSuccess) {
+                const double u0 = now_ms();
+                const cudaError_t ue = cudaGraphExecUpdate(ex, gr, &info);
+                ag_ms_u += now_ms() - u0;
+                if (ue != cudaSuccess) {
                     ++ag_upd_fail;
+                    if (part >= 0 && part < 8) ++ag_fail_p[part];
+                    if (part >= 0 && part < 8 && !ag_res_p[part]) {
+                        ag_res_p[part] = true;
+                        cudaGraphNodeType nt = cudaGraphNodeTypeEmpty;
+                        const char* fname = "?";
+                        if (info.errorNode != nullptr) {
+                            cudaGraphNodeGetType(info.errorNode, &nt);
+                            if (nt == cudaGraphNodeTypeKernel) {
+                                cudaKernelNodeParams kp{};
+                                if (cudaGraphKernelNodeGetParams(info.errorNode, &kp) == cudaSuccess && kp.func != nullptr)
+                                    cudaFuncGetName(&fname, (const void*) kp.func);
+                            }
+                        }
+                        std::fprintf(stderr, "ds4: DS4_ATTN_GRAPH part %d update result code %d, node type %d, func %s\n",
+                                     part, (int) info.result, (int) nt, fname);
+                    }
                     cudaGetLastError();
                     cudaGraphExecDestroy(ex);
                     ex = nullptr;
@@ -14900,13 +14922,23 @@ struct Model::Impl {
                     ++ag_upd;
                 }
             }
-            if (ex == nullptr && cudaGraphInstantiate(&ex, gr, 0) != cudaSuccess) {
-                cudaGetLastError();
-                ex = nullptr;
-            } else if (ex != nullptr) {
+            if (ex == nullptr) {
+                const double i0 = now_ms();
+                const cudaError_t ie = cudaGraphInstantiate(&ex, gr, 0);
+                ag_ms_i += now_ms() - i0;
+                if (ie != cudaSuccess) {
+                    cudaGetLastError();
+                    ex = nullptr;
+                }
+            }
+            if (ex != nullptr) {
                 ++ag_inst;
             }
-            if (ex != nullptr && cudaGraphLaunch(ex, d.st) == cudaSuccess) launched = true;
+            if (ex != nullptr) {
+                const double l0 = now_ms();
+                if (cudaGraphLaunch(ex, d.st) == cudaSuccess) launched = true;
+                ag_ms_l += now_ms() - l0;
+            }
         }
         if (gr != nullptr) cudaGraphDestroy(gr);
         cudaGetLastError();
@@ -14924,6 +14956,13 @@ struct Model::Impl {
             if (++ag_n % 2000 == 0)
                 std::fprintf(stderr, "ds4: DS4_ATTN_GRAPH stats: instantiates %lld, param updates %lld, update failures %lld\n",
                              ag_inst.load(), ag_upd.load(), ag_upd_fail.load());
+            if (ag_n % 2000 == 0)
+                std::fprintf(stderr, "ds4: DS4_ATTN_GRAPH update failures by part: %lld %lld %lld %lld %lld %lld %lld %lld\n",
+                             ag_fail_p[0], ag_fail_p[1], ag_fail_p[2], ag_fail_p[3], ag_fail_p[4], ag_fail_p[5],
+                             ag_fail_p[6], ag_fail_p[7]);
+            if (ag_n % 2000 == 0)
+                std::fprintf(stderr, "ds4: DS4_ATTN_GRAPH host ms so far: instantiate %.2f, update %.2f, launch %.2f (%.2f us a launch)\n",
+                             ag_ms_i, ag_ms_u, ag_ms_l, (ag_ms_i + ag_ms_u + ag_ms_l) * 1000.0 / (double) ag_n);
         }
         return launched ? true : body();
     }

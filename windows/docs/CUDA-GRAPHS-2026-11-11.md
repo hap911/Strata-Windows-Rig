@@ -43,14 +43,29 @@ Same harness, same settings (`--ssd-cache=135`, `--reserve-mib=1200,100`, split 
 Placement is identical (687 experts on the 3080 Ti, 445 MiB free, no drafter loaded), so the 0.1.59 build
 is about **5% slower** than the 0.1.58 one. Byte check on 0.1.59: **128,000 parts, 0 differences**.
 
-Graph stats (`DS4_ATTN_GRAPH` counters, printed every 2,000 launches): over 2,400 decoded tokens there were
+Graph stats (`DS4_ATTN_GRAPH` counters): over 2,400 decoded tokens there were
 **558,000 instantiations, 350,882 in-place updates and 206,954 update failures**. A failure destroys the
-executable graph, so the next token instantiates it again - about 36% of launches. Each instantiation costs
-tens of microseconds, which at ~240 launches a token adds up to the observed few percent. The suspected cause
-of the 5% is this re-instantiation overhead: graph topology varies per token in some parts (the indexer's
-candidate path is taken only while `restrict_` holds; the lookahead's gate count depends on the next layer).
-Next fix: pin each part's topology per layer/token (constant kernel sequence), so updates succeed instead of
-re-instantiating; then re-measure. Not yet applied.
+executable graph, so the next token instantiates it again - about 36% of launches.
+
+**Root cause of the failures (per-part tally, 2-turn run):** failures by part 0..7 = **6000, 0, 28500, 0,
+5992, 0, 28462, 0**. Parts 2 (FFN input, routing, route_publish, shared expert) and 6 (output projections,
+allreduce, ablate, hc post) fail on ~89% of their launches; parts 0 (attention projections) and 4 (indexer)
+on ~19%; parts 1 (sparse attention), 3 (expert gate/up + down) and 5 (window rows) never fail. Every failure
+returns CUDA result code **2 (topology changed)** and the offending node is **type 5 (empty node)**. The
+failing parts are exactly those whose captured lambda calls the F16 matrix-vector helper (`mv`, which uses
+cuBLAS `cublasGemmEx`); the parts without it never fail. Under CUDA 13.4's relaxed stream capture, cuBLAS's
+enqueue is captured as an empty node whose count/position varies per call, so the graph's topology differs
+every token and the update fails.
+
+**Cost:** over 186,000 launches the host spent **4,319 ms instantiating, 2,599 ms updating and 6,122 ms
+launching** - about 70 us per launch, i.e. tens of milliseconds per token (at ~240 launches a token). The
+same overhead exists in the 0.1.58 build (same code, same cuBLAS), so it does not by itself explain the 5%
+delta to 0.1.58; that may also include upstream 0.2.13 decode changes (placement was identical).
+
+**Fix candidate, not yet applied:** keep the cuBLAS `mv` calls outside the captured regions (graph only the
+engine's own kernels), or cache one executable graph per observed topology variant, so updates succeed and
+no instantiation is needed per token. Needs a GPU test window.
+
 
 (The 0.1.58 build's own counters existed but were only printed at exit, which the harness kills; its
 re-instantiation rate is therefore not recorded for comparison.)
