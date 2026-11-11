@@ -305,6 +305,9 @@ Strata at a local signed feed (`STRATA_UPDATE_FEED=<dir>`).
 - **Rebased onto 0.2.13 / 0.1.59 anyway:** upstream changed only `sampler_stat_main.cu` since 0.2.12, so
   all 97 changes applied unchanged; the build (RTX 30/40/50) is installed as `windows\rig\engine\0.1.59`
   and its official backup saved. The new release is `StrataRig-0.1.59-r1`.
-- **Speed:** the 2026-11-08 numbers stand (engine 0.1.58: ~34.4 tok/s average with the desktop in use,
-  ~38 quiet, prompts 398.9; reserve 1200,100). The 0.1.59 build's own benchmark is being run next; the
-  journal records it in [windows/docs/CUDA-GRAPHS-2026-11-11.md](windows/docs/CUDA-GRAPHS-2026-11-11.md).
+- **Speed:** the 0.1.59 build measured on 2026-11-11: **29.2–36.0 tok/s (avg ~32)**, 93.7 / 93.6 s on the
+  same 6-turn test — about **5% below** the 0.1.58 build's ~34.4 (placement identical: 687 experts on the
+  3080 Ti, 445 MiB free). Byte check: 128,000 parts, 0 differences. The graph counters show ~36% of launches
+  re-instantiate instead of updating in place (206,954 update failures over 558,000 instantiations); that
+  overhead is the suspected cause. Next fix: pin each graph part's topology per token; not yet applied.
+  The journal records all of it in [windows/docs/CUDA-GRAPHS-2026-11-11.md](windows/docs/CUDA-GRAPHS-2026-11-11.md).

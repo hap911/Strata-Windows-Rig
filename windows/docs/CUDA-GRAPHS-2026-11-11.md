@@ -31,8 +31,26 @@ build is older, and re-porting onto the newest upstream is optional.
 - Installed as `windows\rig\engine\0.1.59` (outside Strata's folders) with the official exe+dll saved in
   `windows\rig\official\0.1.59`; `versions\v26-upstream0159` keeps the source snapshot.
 
-## Speed (to be filled by the live test)
+## Speed of the 0.1.59 build (measured 2026-11-11, ~15:50-16:10)
 
-The 0.1.58 build measured on 11-08 (same harness): 31.8-36.9 / 31.7-36.9 tok/s (avg ~34.4) with the
-desktop in use, prompts 398.9 tok/s, graph check 128,000 parts byte-identical. The 0.1.59 build's own
-numbers are recorded here after its live benchmark.
+Same harness, same settings (`--ssd-cache=135`, `--reserve-mib=1200,100`, split 14,26, graphs on, adapter on):
+
+| build | total | decode, turns |
+|---|---|---|
+| 0.1.59 (this release) | **93.7 / 93.6 s** | 29.2–36.8 / 29.0–36.0 (**avg ~32**) |
+| 0.1.58 (same patches) | **85 / 86 s** (11-08) | 31.8–37.4 / 31.7–36.9 (**avg ~34.4**) |
+
+Placement is identical (687 experts on the 3080 Ti, 445 MiB free, no drafter loaded), so the 0.1.59 build
+is about **5% slower** than the 0.1.58 one. Byte check on 0.1.59: **128,000 parts, 0 differences**.
+
+Graph stats (`DS4_ATTN_GRAPH` counters, printed every 2,000 launches): over 2,400 decoded tokens there were
+**558,000 instantiations, 350,882 in-place updates and 206,954 update failures**. A failure destroys the
+executable graph, so the next token instantiates it again - about 36% of launches. Each instantiation costs
+tens of microseconds, which at ~240 launches a token adds up to the observed few percent. The suspected cause
+of the 5% is this re-instantiation overhead: graph topology varies per token in some parts (the indexer's
+candidate path is taken only while `restrict_` holds; the lookahead's gate count depends on the next layer).
+Next fix: pin each part's topology per layer/token (constant kernel sequence), so updates succeed instead of
+re-instantiating; then re-measure. Not yet applied.
+
+(The 0.1.58 build's own counters existed but were only printed at exit, which the harness kills; its
+re-instantiation rate is therefore not recorded for comparison.)
